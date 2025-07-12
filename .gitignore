@@ -1,0 +1,67 @@
+# Environment files
+.env
+.env.local
+.env.production
+
+# Docker volumes and data
+data/
+volumes/
+
+# Logs
+*.log
+logs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Personal configuration files
+.clinerules-*
+.roomodes
+.claude/
+docs/memory_bank/
+
+# Screenshots (if accidentally committed)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+
+# But keep logo assets
+!assets/logo/*
+
+# Backup files
+*.bak
+*.backup
+
+# Node modules (if any)
+node_modules/
+
+# Go build artifacts
+watcher/ssbnk-watcher
+watcher/main
+*.exe
+
+# Test files
+test/
+tests/
+*.test
+ruv-*

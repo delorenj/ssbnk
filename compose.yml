@@ -1,0 +1,67 @@
+services:
+  ssbnk-web:
+    image: nginx:alpine
+    container_name: ssbnk-web
+    restart: unless-stopped
+    volumes:
+      - ssbnk_data:/usr/share/nginx/html
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ssbnk.entrypoints=websecure"
+      - "traefik.http.routers.ssbnk.rule=Host(`${SSBNK_DOMAIN}`)"
+      - "traefik.http.routers.ssbnk.tls=true"
+      - "traefik.http.routers.ssbnk.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ssbnk.loadbalancer.server.port=80"
+      - "traefik.docker.network=proxy"
+
+  ssbnk-watcher:
+    build: ./watcher
+    container_name: ssbnk-watcher
+    restart: unless-stopped
+    volumes:
+      - ${SSBNK_WATCH_DIR}:/watch
+      - ssbnk_data:/data
+      # X11 support
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # Wayland support - mount the runtime directory
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}:/run/user/1000:rw
+    environment:
+      # X11 environment
+      - DISPLAY=${DISPLAY:-:0}
+      # Wayland environment
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
+      - XDG_RUNTIME_DIR=/run/user/1000
+      - XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-wayland}
+      # Application environment
+      - SSBNK_URL=${SSBNK_URL}
+      - SSBNK_WATCH_DIR=/watch
+      - SSBNK_DATA_DIR=/data
+    network_mode: host # Needed for clipboard access
+    privileged: true # Needed for clipboard access
+
+  ssbnk-cleanup:
+    image: alpine:latest
+    container_name: ssbnk-cleanup
+    restart: unless-stopped
+    volumes:
+      - ssbnk_data:/data
+      - ./scripts/cleanup.sh:/cleanup.sh:ro
+    environment:
+      - SSBNK_RETENTION_DAYS=${SSBNK_RETENTION_DAYS:-30}
+    command: |
+      sh -c '
+      chmod +x /cleanup.sh
+      echo "0 2 * * * /cleanup.sh" | crontab -
+      crond -f -l 2'
+
+volumes:
+  ssbnk_data:
+    name: ssbnk_data
+
+networks:
+  proxy:
+    external: true

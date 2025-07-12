@@ -1,0 +1,45 @@
+services:
+  ssbnk:
+    image: delorenj/ssbnk:latest # Will be your Docker Hub image
+    container_name: ssbnk
+    restart: unless-stopped
+    volumes:
+      # Screenshot watch directory
+      - ${SSBNK_WATCH_DIR}:/watch
+      # Data persistence
+      - ssbnk_data:/data
+      # X11 support
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # Wayland support
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}:/run/user/1000:rw
+    environment:
+      # Service configuration
+      - SSBNK_URL=${SSBNK_URL}
+      - SSBNK_RETENTION_DAYS=${SSBNK_RETENTION_DAYS:-30}
+      # Display server environment
+      - DISPLAY=${DISPLAY:-:0}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
+      - XDG_RUNTIME_DIR=/run/user/1000
+      - XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-wayland}
+    networks:
+      - proxy
+    labels:
+      # Traefik configuration
+      - "traefik.enable=true"
+      - "traefik.http.routers.ssbnk.entrypoints=websecure"
+      - "traefik.http.routers.ssbnk.rule=Host(`${SSBNK_DOMAIN}`)"
+      - "traefik.http.routers.ssbnk.tls=true"
+      - "traefik.http.routers.ssbnk.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ssbnk.loadbalancer.server.port=80"
+      - "traefik.docker.network=proxy"
+    # Required for clipboard access
+    network_mode: host
+    privileged: true
+
+volumes:
+  ssbnk_data:
+    name: ssbnk_data
+
+networks:
+  proxy:
+    external: true
