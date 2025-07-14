@@ -2,14 +2,12 @@
 
 **Screenshot sharing that hits different**
 
-> *Pronounced "spank" - because your screenshots deserve a good hosting!*
-
 A dead simple, lightning-fast screenshot hosting service designed for developers, content creators, and anyone who needs instant screenshot sharing.
 
 ## ✨ Features
 
 - 📸 **Instant hosting**: Screenshots are immediately available via HTTPS
-- 📋 **Auto-clipboard**: URLs automatically copied to clipboard  
+- 📋 **Auto-clipboard**: URLs automatically copied to clipboard
 - 🗑️ **Smart cleanup**: Configurable retention with intelligent daily cleanup
 - 🖥️ **Display server agnostic**: Supports both X11 and Wayland seamlessly
 - 🔒 **Secure by default**: Hosted behind reverse proxy with automatic TLS
@@ -65,4 +63,4 @@ MIT License - see [LICENSE](https://github.com/delorenj/ssbnk/blob/main/LICENSE)
 
 ---
 
-**Made with 📸 and ☕ by developers, for developers.**
+**Made with 📸 and ❤️ by delorenj, for developers.**

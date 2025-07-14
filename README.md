@@ -8,7 +8,40 @@
   > *Pronounced "spank" - because your screenshots deserve a good hosting!*
 </div>
 
-A dead simple, lightning-fast screenshot hosting service designed for developers, content creators, and anyone who needs instant screenshot sharing. Built with LLM workflows in mind but perfect for any use case.
+I built ssbnk because I couldn't find a screenshot hosting solution that was simple and flexible enough for my LLM workflow. 
+
+Here's the problem: Modern AI tools like Claude Code and OpenCode require image URLs, not local files. When you're SSH'd into a dev machine, getting screenshots to these tools is a pain:
+- First you have to scp the file over
+- Then deal with default screenshot names full of spaces and massive date strings
+- Rename everything to something sane like `1.png`
+- Still manually point to each image
+
+Sometimes I just want a symlink to the "current" screenshot. Other times I need to reference multiple screenshots in a batch. Existing solutions were either too complex, too slow, or required too much manual work.
+
+ssbnk solves this by automatically:
+- Watching your screenshot directory
+- Renaming files to clean, timestamp-based names
+- Hosting them instantly via HTTPS
+- Copying the URL to your clipboard
+- Managing retention and cleanup
+
+Dead simple. Lightning fast. Built for developers who use AI tools.
+
+### The Workflow
+
+```bash
+# Take a screenshot (however you normally do)
+# It's saved to ~/screenshots/Screenshot 2024-03-15 at 2.35.47 PM.png
+
+# ssbnk automatically:
+# 1. Detects the new file
+# 2. Renames it to: 20240315-1435.png
+# 3. Hosts it at: https://screenshots.example.com/hosted/20240315-1435.png
+# 4. Copies URL to clipboard
+
+# Now just paste into Claude Code/OpenCode/ChatGPT
+# No manual steps. No renaming. No uploading.
+```
 
 [![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
 [![Go](https://img.shields.io/badge/go-%2300ADD8.svg?style=for-the-badge&logo=go&logoColor=white)](https://golang.org/)
