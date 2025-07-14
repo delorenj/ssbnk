@@ -97,7 +97,7 @@ curl -O https://raw.githubusercontent.com/delorenj/ssbnk/main/.env.example
 
 # Configure
 cp .env.example .env
-nano .env  # Edit with your settings
+vi .env  # Edit with your settings
 
 # Run
 docker compose -f docker-compose.packaged.yml up -d
@@ -111,7 +111,7 @@ For development or customization:
 git clone https://github.com/delorenj/ssbnk.git
 cd ssbnk
 cp .env.example .env
-nano .env  # Edit with your settings
+vi .env  # Edit with your settings
 docker compose up -d
 ```
 

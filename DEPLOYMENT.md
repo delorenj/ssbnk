@@ -43,7 +43,7 @@ docker run -d \
 2. **Configure:**
    ```bash
    cp .env.example .env
-   nano .env  # Edit with your settings
+   vi .env  # Edit with your settings
    ```
 
 3. **Deploy:**
