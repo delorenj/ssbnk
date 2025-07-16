@@ -1,8 +1,0 @@
-feat: add new feature
-
-Add a new feature to improve user experience. This change includes:
-- Implementation of the new feature
-- Updated documentation
-- Added unit tests
-
-Closes #123
