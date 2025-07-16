@@ -61,7 +61,7 @@ autostart=true
 autorestart=true
 stderr_logfile=/var/log/supervisor/watcher.err.log
 stdout_logfile=/var/log/supervisor/watcher.out.log
-environment=SSBNK_WATCH_DIR="/watch",SSBNK_DATA_DIR="/data",SSBNK_URL="%(ENV_SSBNK_URL)s"
+environment=SSBNK_IMAGE_DIR="/watch",SSBNK_DATA_DIR="/data",SSBNK_URL="%(ENV_SSBNK_URL)s"
 
 [program:cleanup-cron]
 command=/bin/sh -c 'echo "0 2 * * * /usr/local/bin/cleanup.sh" | crontab - && crond -f'
@@ -87,7 +87,7 @@ echo ""
 
 # Display configuration
 echo "Configuration:"
-echo "  📁 Watch Directory: \${SSBNK_WATCH_DIR:-/watch}"
+echo "  📁 Watch Directory: \${SSBNK_IMAGE_DIR:-/watch}"
 echo "  🌐 Service URL: \${SSBNK_URL:-https://localhost}"
 echo "  🗑️  Retention Days: \${SSBNK_RETENTION_DAYS:-30}"
 echo ""
@@ -114,13 +114,13 @@ fi
 echo ""
 
 # Set default environment variables
-export SSBNK_WATCH_DIR=\${SSBNK_WATCH_DIR:-/watch}
+export SSBNK_IMAGE_DIR=\${SSBNK_IMAGE_DIR:-/watch}
 export SSBNK_DATA_DIR=\${SSBNK_DATA_DIR:-/data}
 export SSBNK_URL=\${SSBNK_URL:-https://localhost}
 export SSBNK_RETENTION_DAYS=\${SSBNK_RETENTION_DAYS:-30}
 
 # Ensure directories exist with proper permissions
-mkdir -p "\$SSBNK_DATA_DIR/hosted" "\$SSBNK_DATA_DIR/metadata" "\$SSBNK_DATA_DIR/archive" "\$SSBNK_WATCH_DIR"
+mkdir -p "\$SSBNK_DATA_DIR/hosted" "\$SSBNK_DATA_DIR/metadata" "\$SSBNK_DATA_DIR/archive" "\$SSBNK_IMAGE_DIR"
 
 # Start supervisor
 echo "🎬 Starting all services..."
@@ -141,7 +141,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # Environment variables with defaults
 ENV SSBNK_URL=https://localhost
-ENV SSBNK_WATCH_DIR=/watch
+ENV SSBNK_IMAGE_DIR=/watch
 ENV SSBNK_DATA_DIR=/data
 ENV SSBNK_RETENTION_DAYS=30
 
