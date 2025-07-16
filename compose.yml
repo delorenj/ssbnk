@@ -23,7 +23,8 @@ services:
     container_name: ssbnk-watcher
     restart: unless-stopped
     volumes:
-      - ${SSBNK_WATCH_DIR}:/watch
+      - ${SSBNK_IMAGE_DIR}:/watch
+      - ${HOME}/Videos/Screencasts:/videos
       - ssbnk_data:/data
       # X11 support
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
@@ -38,7 +39,8 @@ services:
       - XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-wayland}
       # Application environment
       - SSBNK_URL=${SSBNK_URL}
-      - SSBNK_WATCH_DIR=/watch
+      - SSBNK_IMAGE_DIR=/watch
+      - SSBNK_VIDEO_DIR=/videos
       - SSBNK_DATA_DIR=/data
     network_mode: host # Needed for clipboard access
     privileged: true # Needed for clipboard access

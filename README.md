@@ -1,55 +1,12 @@
-<div align="center">
-  <img src="assets/logo/full.png" alt="ssbnk Logo" width="400">
-  
-  # ssbnk (ScreenShot Bank)
-  
-  **Screenshot sharing that hits different**
-  
-  > *Pronounced "spank" - because your screenshots deserve a good hosting!*
-</div>
+# 📸 ssbnk (ScreenShot Bank)
 
-I built ssbnk because I couldn't find a screenshot hosting solution that was simple and flexible enough for my LLM workflow. 
+> _Pronounced "spank" - because your screenshots deserve a good hosting!_
 
-Here's the problem: Modern AI tools like Claude Code and OpenCode require image URLs, not local files. When you're SSH'd into a dev machine, getting screenshots to these tools is a pain:
-- First you have to scp the file over
-- Then deal with default screenshot names full of spaces and massive date strings
-- Rename everything to something sane like `1.png`
-- Still manually point to each image
-
-Sometimes I just want a symlink to the "current" screenshot. Other times I need to reference multiple screenshots in a batch. Existing solutions were either too complex, too slow, or required too much manual work.
-
-ssbnk solves this by automatically:
-- Watching your screenshot directory
-- Renaming files to clean, timestamp-based names
-- Hosting them instantly via HTTPS
-- Copying the URL to your clipboard
-- Managing retention and cleanup
-
-Dead simple. Lightning fast. Built for developers who use AI tools.
-
-### The Workflow
-
-```bash
-# Take a screenshot (however you normally do)
-# It's saved to ~/screenshots/Screenshot 2024-03-15 at 2.35.47 PM.png
-
-# ssbnk automatically:
-# 1. Detects the new file
-# 2. Renames it to: 20240315-1435.png
-# 3. Hosts it at: https://screenshots.example.com/hosted/20240315-1435.png
-# 4. Copies URL to clipboard
-
-# Now just paste into Claude Code/OpenCode/ChatGPT
-# No manual steps. No renaming. No uploading.
-```
+A dead simple, lightning-fast screenshot hosting service designed for developers, content creators, and anyone who needs instant screenshot sharing. Built with LLM workflows in mind but perfect for any use case.
 
 [![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
 [![Go](https://img.shields.io/badge/go-%2300ADD8.svg?style=for-the-badge&logo=go&logoColor=white)](https://golang.org/)
 [![Nginx](https://img.shields.io/badge/nginx-%23009639.svg?style=for-the-badge&logo=nginx&logoColor=white)](https://nginx.org/)
-
-[![Docker Hub](https://img.shields.io/docker/pulls/ssbnk/ssbnk?style=flat-square&logo=docker)](https://hub.docker.com/r/ssbnk/ssbnk)
-[![GitHub Container Registry](https://img.shields.io/badge/ghcr.io-ssbnk-blue?style=flat-square&logo=github)](https://ghcr.io/delorenj/ssbnk)
-[![Docker Image Size](https://img.shields.io/docker/image-size/ssbnk/ssbnk/latest?style=flat-square&logo=docker)](https://hub.docker.com/r/ssbnk/ssbnk)
 
 ## ✨ Features
 
@@ -64,62 +21,42 @@ Dead simple. Lightning fast. Built for developers who use AI tools.
 
 ## 🚀 Quick Start
 
-### Option 1: Docker Image (Recommended)
-
-The easiest way to get started is with our pre-built Docker image:
-
-```bash
-# Quick start with default settings
-curl -sSL https://raw.githubusercontent.com/delorenj/ssbnk/main/scripts/run-ssbnk.sh | bash
-
-# Or run manually
-docker run -d \
-  --name ssbnk \
-  --network host \
-  --privileged \
-  -v $HOME/screenshots:/watch \
-  -v ssbnk_data:/data \
-  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  -v /run/user/1000:/run/user/1000:rw \
-  -e SSBNK_URL=https://screenshots.example.com \
-  -e DISPLAY=$DISPLAY \
-  -e WAYLAND_DISPLAY=$WAYLAND_DISPLAY \
-  -e XDG_RUNTIME_DIR=/run/user/1000 \
-  ssbnk/ssbnk:latest
-```
-
-### Option 2: Docker Compose (Packaged)
-
-```bash
-# Download the packaged compose file
-curl -O https://raw.githubusercontent.com/delorenj/ssbnk/main/docker-compose.packaged.yml
-curl -O https://raw.githubusercontent.com/delorenj/ssbnk/main/.env.example
-
-# Configure
-cp .env.example .env
-vi .env  # Edit with your settings
-
-# Run
-docker compose -f docker-compose.packaged.yml up -d
-```
-
-### Option 3: Build from Source
-
-For development or customization:
-
-```bash
-git clone https://github.com/delorenj/ssbnk.git
-cd ssbnk
-cp .env.example .env
-vi .env  # Edit with your settings
-docker compose up -d
-```
-
 ### Prerequisites
 
 - Docker and Docker Compose
 - A domain name (for HTTPS hosting)
 - Traefik reverse proxy (or modify for your preferred proxy)
+
+### Installation
+
+1. **Clone and setup:**
+
+   ```bash
+   git clone https://github.com/delorenj/ssbnk
+   cd ssbnk
+   cp .env.example .env
+   ```
+
+2. **Configure your environment:**
+
+   ```bash
+   # Edit .env with your settings
+   vi .env
+   ```
+
+3. **Check your display server:**
+
+   ```bash
+   ./scripts/detect-display-server.sh
+   ```
+
+4. **Start the service:**
+
+   ```bash
+   docker compose up -d
+   ```
+
+5. **Take a screenshot** and save it to your configured directory - the URL will be copied to your clipboard!
 
 ## ⚙️ Configuration
 
@@ -129,13 +66,13 @@ Create a `.env` file from `.env.example` and customize:
 
 ```bash
 # Service URL (full URL with https://)
-SSBNK_URL=https://ssbnk.example.com
+SSBNK_URL=https://ssbnk.yourdomain.com
 
 # Service domain (domain only, for Traefik)
-SSBNK_DOMAIN=ssbnk.example.com
+SSBNK_DOMAIN=ssbnk.yourdomain.com
 
 # Screenshot source directory (where you save screenshots)
-SSBNK_WATCH_DIR=/home/username/screenshots
+SSBNK_IMAGE_DIR=/home/yourusername/screenshots
 
 # Retention period (days)
 SSBNK_RETENTION_DAYS=30
@@ -333,10 +270,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🔗 Links
 
-- [Issues](https://github.com/delorenj/ssbnk/issues)
-- [Pull Requests](https://github.com/delorenj/ssbnk/pulls)
-- [Releases](https://github.com/delorenj/ssbnk/releases)
-- [Wiki](https://github.com/delorenj/ssbnk/wiki)
+- [Issues](https://github.com/yourusername/ssbnk/issues)
+- [Pull Requests](https://github.com/yourusername/ssbnk/pulls)
+- [Releases](https://github.com/yourusername/ssbnk/releases)
+- [Wiki](https://github.com/yourusername/ssbnk/wiki)
 
 ---
 

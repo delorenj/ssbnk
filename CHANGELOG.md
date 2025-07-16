@@ -9,16 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Initial release of ssbnk (ScreenShot Bank)
-- Professional logo design with full branding package
 - Automatic screenshot detection and hosting
 - Cross-platform clipboard support (X11 and Wayland)
 - Smart cleanup with configurable retention
 - Docker Compose deployment
 - Traefik integration with automatic TLS
 - Comprehensive documentation
-- Single packaged Docker image for easy deployment
-- Automated builds via GitHub Actions
-- Multi-registry support (Docker Hub + GHCR)
 
 ### Features
 - 📸 Instant screenshot hosting via HTTPS

@@ -6,20 +6,20 @@ This guide covers all configuration options for ssbnk.
 
 ### Required Variables
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `SSBNK_URL` | Full URL to your service (with https://) | `https://screenshots.example.com` |
-| `SSBNK_WATCH_DIR` | Directory where you save screenshots | `/home/username/screenshots` |
+| Variable          | Description                          | Example                      |
+| ----------------- | ------------------------------------ | ---------------------------- |
+| `SSBNK_URL`       | Your domain name (without https://)  | `screenshots.yourdomain.com` |
+| `SSBNK_IMAGE_DIR` | Directory where you save screenshots | `/home/username/screenshots` |
 
 ### Optional Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SSBNK_RETENTION_DAYS` | `30` | Days to keep files before archiving |
-| `DISPLAY` | `:0` | X11 display server |
-| `WAYLAND_DISPLAY` | `wayland-0` | Wayland display server |
-| `XDG_SESSION_TYPE` | `wayland` | Session type |
-| `XDG_RUNTIME_DIR` | `/run/user/1000` | Runtime directory |
+| Variable               | Default          | Description                         |
+| ---------------------- | ---------------- | ----------------------------------- |
+| `SSBNK_RETENTION_DAYS` | `30`             | Days to keep files before archiving |
+| `DISPLAY`              | `:0`             | X11 display server                  |
+| `WAYLAND_DISPLAY`      | `wayland-0`      | Wayland display server              |
+| `XDG_SESSION_TYPE`     | `wayland`        | Session type                        |
+| `XDG_RUNTIME_DIR`      | `/run/user/1000` | Runtime directory                   |
 
 ## Docker Compose Configuration
 
@@ -39,6 +39,7 @@ labels:
 ### Volume Mounts
 
 The watcher service needs access to:
+
 - Your screenshot directory (read/write)
 - X11/Wayland sockets for clipboard access
 - Runtime directory for Wayland
@@ -59,6 +60,7 @@ The nginx service serves static files with optimized caching. The configuration 
 ## Cleanup Configuration
 
 The cleanup service runs daily at 2:00 AM and:
+
 - Archives files older than `SSBNK_RETENTION_DAYS`
 - Removes old archives
 - Cleans up orphaned metadata
@@ -75,6 +77,7 @@ The cleanup service runs daily at 2:00 AM and:
 ### Custom Domain
 
 Update your `.env` file:
+
 ```bash
 SSBNK_URL=your-custom-domain.com
 ```
@@ -82,13 +85,15 @@ SSBNK_URL=your-custom-domain.com
 ### Custom Screenshot Directory
 
 Update your `.env` file:
+
 ```bash
-SSBNK_WATCH_DIR=/path/to/your/screenshots
+SSBNK_IMAGE_DIR=/path/to/your/screenshots
 ```
 
 ### Custom Retention Period
 
 Update your `.env` file:
+
 ```bash
 SSBNK_RETENTION_DAYS=60  # Keep files for 60 days
 ```
