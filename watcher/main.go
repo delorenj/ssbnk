@@ -122,6 +122,76 @@ func main() {
 }
 
 func processScreenshot(sourcePath string, config Config) error {
+	// Special handling for GIF files that might be from video conversion
+	if strings.HasSuffix(strings.ToLower(sourcePath), ".gif") {
+		// Check if this GIF was created recently (likely from video conversion)
+		fileInfo, err := os.Stat(sourcePath)
+		if err != nil {
+			return fmt.Errorf("failed to get file info: %w", err)
+		}
+
+		// If created within last 5 seconds, it's likely from video conversion
+		if time.Since(fileInfo.ModTime()) < 5*time.Second {
+			// Move directly to hosted directory without renaming
+			destPath := filepath.Join(config.DataDir, "hosted", filepath.Base(sourcePath))
+
+			// Ensure unique filename (unlikely needed for GIFs but just in case)
+			counter := 1
+			originalDestPath := destPath
+			for fileExists(destPath) {
+				destPath = fmt.Sprintf("%s-%d.gif", strings.TrimSuffix(originalDestPath, ".gif"), counter)
+				counter++
+			}
+
+			// Move the file
+			if err := os.Rename(sourcePath, destPath); err != nil {
+				// If rename fails (cross-device), fall back to copy
+				if err := copyFile(sourcePath, destPath); err != nil {
+					return fmt.Errorf("failed to move GIF: %w", err)
+				}
+				// Remove original after successful copy
+				if err := os.Remove(sourcePath); err != nil {
+					log.Printf("Warning: Failed to remove original GIF: %v", err)
+				}
+			}
+
+			// Generate URL with original filename
+			url := fmt.Sprintf("%s/hosted/%s", config.BaseURL, filepath.Base(destPath))
+
+			// Create metadata
+			metadata := ScreenshotMetadata{
+				ID:           uuid.New().String(),
+				OriginalName: filepath.Base(sourcePath),
+				Filename:     filepath.Base(destPath),
+				URL:          url,
+				Timestamp:    time.Now(),
+				Size:         fileInfo.Size(),
+				Preserve:     false,
+			}
+
+			// Save metadata
+			metadataPath := filepath.Join(config.DataDir, "metadata", fmt.Sprintf("%s.json", metadata.ID))
+			if err := saveMetadata(metadata, metadataPath); err != nil {
+				log.Printf("Warning: Failed to save metadata: %v", err)
+			}
+
+			// Copy URL to clipboard
+			if err := copyToClipboard(url); err != nil {
+				log.Printf("Warning: Failed to copy to clipboard: %v", err)
+			}
+
+			// Open GIF in browser
+			log.Printf("Opening GIF in browser: %s", url)
+			if err := openInBrowser(url); err != nil {
+				log.Printf("Warning: Failed to open in browser: %v", err)
+			}
+
+			log.Printf("GIF processed: %s -> %s", filepath.Base(sourcePath), url)
+			return nil
+		}
+	}
+
+	// Regular screenshot processing for non-GIF or older GIF files
 	// Generate new filename with timestamp
 	now := time.Now()
 	newFilename := fmt.Sprintf("%s.png", now.Format("20060102-1504"))
@@ -188,23 +258,16 @@ func processScreenshot(sourcePath string, config Config) error {
 		log.Printf("Warning: Failed to copy to clipboard: %v", err)
 	}
 
-	// If this is a GIF (from video conversion), open it in browser
-	if strings.HasSuffix(strings.ToLower(newFilename), ".gif") {
-		log.Printf("Opening GIF in browser: %s", url)
-		if err := openInBrowser(url); err != nil {
-			log.Printf("Warning: Failed to open in browser: %v", err)
-		}
-	}
-
 	log.Printf("Screenshot processed: %s -> %s", filepath.Base(sourcePath), url)
 	return nil
 }
 
 func processVideo(sourcePath string, config Config) error {
-	// Generate temporary GIF filename
+	// Generate GIF filename with timestamp
 	now := time.Now()
 	gifFilename := fmt.Sprintf("%s.gif", now.Format("20060102-1504"))
 	tempGifPath := filepath.Join("/tmp", gifFilename)
+	hostedGifPath := filepath.Join(config.DataDir, "hosted", gifFilename)
 
 	// Convert video to GIF using ffmpeg
 	log.Printf("Converting video to GIF: %s", filepath.Base(sourcePath))
@@ -270,35 +333,63 @@ func processVideo(sourcePath string, config Config) error {
 		return fmt.Errorf("video conversion failed after 3 attempts: %w", lastErr)
 	}
 
-	// Move GIF to watch directory for processing
-	destPath := filepath.Join(config.WatchDir, gifFilename)
-
-	// Copy the GIF file
-	sourceFile, err := os.Open(tempGifPath)
+	// Move GIF directly to hosted directory (skip watch directory)
+	// First try rename (atomic operation)
+	err := os.Rename(tempGifPath, hostedGifPath)
 	if err != nil {
-		return fmt.Errorf("failed to open temp GIF: %w", err)
+		// If rename fails (cross-device), fall back to copy
+		if err := copyFile(tempGifPath, hostedGifPath); err != nil {
+			return fmt.Errorf("failed to move GIF to hosted directory: %w", err)
+		}
+		// Remove temp file after successful copy
+		if err := os.Remove(tempGifPath); err != nil {
+			log.Printf("Warning: Failed to remove temp GIF: %v", err)
+		}
 	}
-	defer sourceFile.Close()
 
-	destFile, err := os.Create(destPath)
+	// Get file info for metadata
+	fileInfo, err := os.Stat(hostedGifPath)
 	if err != nil {
-		return fmt.Errorf("failed to create destination GIF: %w", err)
-	}
-	defer destFile.Close()
-
-	if _, err := destFile.ReadFrom(sourceFile); err != nil {
-		return fmt.Errorf("failed to copy GIF: %w", err)
+		return fmt.Errorf("failed to get GIF file info: %w", err)
 	}
 
-	// Clean up temp file
-	os.Remove(tempGifPath)
+	// Generate URL
+	url := fmt.Sprintf("%s/hosted/%s", config.BaseURL, gifFilename)
+
+	// Create metadata
+	metadata := ScreenshotMetadata{
+		ID:           uuid.New().String(),
+		OriginalName: filepath.Base(sourcePath),
+		Filename:     gifFilename,
+		URL:          url,
+		Timestamp:    now,
+		Size:         fileInfo.Size(),
+		Preserve:     false,
+	}
+
+	// Save metadata
+	metadataPath := filepath.Join(config.DataDir, "metadata", fmt.Sprintf("%s.json", metadata.ID))
+	if err := saveMetadata(metadata, metadataPath); err != nil {
+		log.Printf("Warning: Failed to save metadata: %v", err)
+	}
+
+	// Copy URL to clipboard
+	if err := copyToClipboard(url); err != nil {
+		log.Printf("Warning: Failed to copy to clipboard: %v", err)
+	}
+
+	// Open GIF in browser
+	log.Printf("Opening GIF in browser: %s", url)
+	if err := openInBrowser(url); err != nil {
+		log.Printf("Warning: Failed to open in browser: %v", err)
+	}
 
 	// Remove the original video file
 	if err := os.Remove(sourcePath); err != nil {
 		log.Printf("Warning: Failed to remove original video: %v", err)
 	}
 
-	log.Printf("Video converted to GIF: %s -> %s", filepath.Base(sourcePath), gifFilename)
+	log.Printf("Video converted to GIF: %s -> %s", filepath.Base(sourcePath), url)
 	return nil
 }
 
@@ -576,4 +667,23 @@ func notifyHostToOpen(url string) error {
 
 	_, err = file.WriteString(url + "\n")
 	return err
+}
+
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("failed to open source file: %w", err)
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("failed to create destination file: %w", err)
+	}
+	defer destFile.Close()
+
+	if _, err := destFile.ReadFrom(sourceFile); err != nil {
+		return fmt.Errorf("failed to copy file: %w", err)
+	}
+	return nil
 }
