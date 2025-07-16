@@ -1,0 +1,11 @@
+[tasks.mount]
+description = "Mount ssbnk_data volume to ./data (requires sudo)"
+run = "./scripts/mount-volume.sh"
+
+[tasks.umount]
+description = "Unmount ssbnk_data volume from ./data (requires sudo)"
+run = "./scripts/umount-volume.sh"
+
+[tasks.get]
+description = "Get hosted file URL by fuzzy search"
+run = "./scripts/get-hosted-url.sh"
