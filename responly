@@ -1,0 +1,366 @@
+[17:49:58] Browser tool available (using playwright)                
+[17:49:58] WARNING  Skipping all confirmation prompts.    cli.py:176
+           Using model: openrouter/deepseek/deepseek-chat           
+           Using logdir                                             
+           ~/.local/share/gptme/logs/2025-07-16-hopping-sad-alien   
+           Using workspace at ~/code/utils/ssbnk                    
+Skipped 1 hidden system messages, show with --show-hidden
+--- ^^^ past messages ^^^ ---
+User: 
+# Goal
+Generate an idiomatic git commit message.
+
+## Requirements
+Assistant: Thinking...                                                                    Assistant: <thinking>
+To generate an idiomatic git commit message, I need to follow best 
+practices for commit messages. This typically includes:
+1. A concise subject line (50 characters or less)
+2. A blank line separating the subject from the body
+3. A detailed body (wrapped at 72 characters) explaining what and 
+why, not how
+4. Use of imperative mood ("Add feature" not "Added feature")
+5. Reference to any relevant issues or tickets
+</thinking>
+
+Here's a template for an idiomatic git commit message:
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+Where:
+- `<type>`: The type of change (e.g., feat, fix, docs, style, 
+refactor, test, chore)
+- `<scope>`: The scope of the change (optional, e.g., module or 
+component name)
+- `<subject>`: A brief description of the change
+- `<body>`: A detailed explanation of the change
+- `<footer>`: Reference to issues or breaking changes (optional)
+
+Example commit message:
+
+```
+feat(authentication): add OAuth2 support
+
+Implement OAuth2 authentication flow to allow users to sign in with 
+Google
+and GitHub accounts. This includes new endpoints for OAuth2 
+callbacks and
+token management.
+
+Closes #123
+```
+
+Would you like me to generate a specific commit message based on 
+some changes? If so, please describe the changes you've made.
+User: 
+First line contains a concise high-level description of the 
+change(s).
+- Second line should be left blank
+- (Conditional) A change log breaking the changes down into 
+individual high-level descriptions of each change made.
+    - Depending on the complexity of the change(s), including the 
+number of files changed, apparent complexity, etc, this section may 
+be omitted.
+    - If the change(s) are determined to be somewhat trivial, making
+the change log overkill, you may only submit the first line summary.
+    - As a general rule of thumb, if the change(s) can be broken 
+into at least 3 high-level descriptions of non-overlapping tasks and
+non-redundant change log entries, then do NOT omit the change log.
+
+> > [!IMPORTANT]
+> BE CAREFUL TO ONLY OUTPUT THE ACTUAL COMMIT MESSAGE. I DON'T CARE 
+HOW YOU ARRIVED AT IT, AND I DON'T WANT TO SEE "Here's an idiomatic 
+commit message for you!" ETC...
+
+**WARNING** IF YOU FAIL TO ADHERE TO THE ABOVE YOU WILL BE FINED 
+$1000
+
+/tmp/d
+
+```/tmp/d
+diff --git a/README.md b/README.md
+index eb4b869..329ed19 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # 📸 ssbnk (ScreenShot Bank)
+ 
+-> _Pronounced "spank" - because your screenshots deserve a good 
+hosting!_
++> \_Pronounced "spank", obviously
+ 
+ A dead simple, lightning-fast screenshot hosting service designed 
+for developers, content creators, and anyone who needs instant 
+screenshot sharing. Built with LLM workflows in mind but perfect for
+any use case.
+ 
+diff --git a/commit_message.txt b/commit_message.txt
+new file mode 100644
+index 0000000..278ae06
+--- /dev/null
++++ b/commit_message.txt
+@@ -0,0 +1,8 @@
++feat: add new feature
++
++Add a new feature to improve user experience. This change includes:
++- Implementation of the new feature
++- Updated documentation
++- Added unit tests
++
++Closes #123
+diff --git a/responly b/responly
+new file mode 100644
+index 0000000..afb1a96
+--- /dev/null
++++ b/responly
+@@ -0,0 +1,218 @@
++[17:48:28] Browser tool available (using playwright)               
++[17:48:28] WARNING  Skipping all confirmation prompts.    
+cli.py:176
++           Using model: openrouter/deepseek/deepseek-chat          
++           Using logdir                                            
++           
+~/.local/share/gptme/logs/2025-07-16-swimming-sneaky-bird
++           Using workspace at ~/code/utils/ssbnk                   
++Skipped 1 hidden system messages, show with --show-hidden
++--- ^^^ past messages ^^^ ---
++User: 
++# Goal
++Generate an idiomatic git commit message.
++
++## Requirements
++Assistant: Thinking...
+                                                                    
+Assistant: <thinking>
++To generate an idiomatic git commit message, I need to follow best 
++practices for commit messages. These typically include:
++
++1. A short, concise subject line (50 characters or less)
++2. A blank line separating the subject from the body
++3. A body that explains what and why (72 characters per line)
++4. Use imperative mood ("Add feature" not "Added feature")
++5. Reference issues or tickets if applicable
++</thinking>
++
++Here's a template for an idiomatic git commit message:
++
++
+```
++Short subject line (50 chars or less)
++
++More detailed explanatory text, if necessary. Wrap it to about 72
++characters or so. In some contexts, the first line is treated as 
+the
++subject of the commit and the rest of the text as the body. The
++blank line separating the summary from the body is critical (unless
++you omit the body entirely); various tools like `log`, `shortlog`
++and `rebase` can get confused if you run the two together.
++
++Explain the problem that this commit is solving. Focus on why you
++are making this change as opposed to how (the code explains that).
++Are there side effects or other unintuitive consequences of this
++change? Here's the place to explain them.
++
++Further paragraphs come after blank lines.
++
++ - Bullet points are okay, too
++
++ - Typically a hyphen or asterisk is used for the bullet, preceded
++   by a single space, with blank lines in between, but conventions
++   vary here
++
++If you use an issue tracker, put references to them at the bottom,
++like this:
++
++Resolves: #123
++See also: #456, #789
++```
++
++Would you like me to generate a specific commit message based on 
++some changes? If so, please describe the changes made.
++User: 
++First line contains a concise high-level description of the 
++change(s).
++- Second line should be left blank
++- (Conditional) A change log breaking the changes down into 
++individual high-level descriptions of each change made.
++    - Depending on the complexity of the change(s), including the 
++number of files changed, apparent complexity, etc, this section may
++be omitted.
++    - If the change(s) are determined to be somewhat trivial, 
+making
++the change log overkill, you may only submit the first line 
+summary.
++    - As a general rule of thumb, if the change(s) can be broken 
++into at least 3 high-level descriptions of non-overlapping tasks 
+and
++non-redundant change log entries, then do NOT omit the change log.
++
++> > [!IMPORTANT]
++> BE CAREFUL TO ONLY OUTPUT THE ACTUAL COMMIT MESSAGE. I DON'T CARE
++HOW YOU ARRIVED AT IT, AND I DON'T WANT TO SEE "Here's an idiomatic
++commit message for you!" ETC...
++
++**WARNING** IF YOU FAIL TO ADHERE TO THE ABOVE YOU WILL BE FINED 
++$1000
++
++/tmp/d
++
++
+```/tmp/d
++diff --git a/commit_message.txt b/commit_message.txt
++new file mode 100644
++index 0000000..278ae06
++--- /dev/null
+++++ b/commit_message.txt
++@@ -0,0 +1,8 @@
+++feat: add new feature
+++
+++Add a new feature to improve user experience. This change 
+includes:
+++- Implementation of the new feature
+++- Updated documentation
+++- Added unit tests
+++
+++Closes #123
++diff --git a/responly b/responly
++new file mode 100644
++index 0000000..c9e865f
++--- /dev/null
+++++ b/responly
++@@ -0,0 +1,90 @@
+++[17:48:03] Browser tool available (using playwright)              
+++[17:48:04] WARNING  Skipping all confirmation prompts.    
++cli.py:176
+++[17:48:04] Using model: openrouter/deepseek/deepseek-chat         
+++           Using logdir                                           
+++           
+~/.local/share/gptme/logs/2025-07-16-dancing-crazy-mouse
+++           Using workspace at ~/code/utils/ssbnk                  
+++Skipped 1 hidden system messages, show with --show-hidden
+++--- ^^^ past messages ^^^ ---
+++User: 
+++# Goal
+++Generate an idiomatic git commit message.
+++
+++## Requirements
+++Assistant: Thinking...
++                                                                   
++Assistant: <thinking>
+++To generate an idiomatic git commit message, I need to follow best
+++practices for commit messages. A good commit message should be 
+++concise, descriptive, and follow a standard format. Typically, it 
+++includes a short subject line (50 characters or less) and an 
+++optional body that provides more context. The subject line should 
++be
+++in the imperative mood, describing what the commit does rather 
+than
+++what it did.
+++
+++Given that I don't have specific changes to describe, I'll 
+generate
+++a generic commit message that can be adapted to various scenarios.
+++</thinking>
+++
+++Here’s an example of an idiomatic git commit message:
+++
+++
++```
+++feat: add new feature to handle user authentication
+++
+++- Implemented user login and registration functionality
+++- Added password hashing for security
+++- Updated documentation to reflect new changes
+++
+```
+++
+++This message follows the conventional commit format, which is 
++widely
+++used in the industry. The `feat:` prefix indicates a new feature, 
+++and the body provides additional details about the changes.
+++User: 
+++First line contains a concise high-level description of the 
+++change(s).
+++- Second line should be left blank
+++- (Conditional) A change log breaking the changes down into 
+++individual high-level descriptions of each change made.
+++    - Depending on the complexity of the change(s), including the 
+++number of files changed, apparent complexity, etc, this section 
+may
+++be omitted.
+++    - If the change(s) are determined to be somewhat trivial, 
++making
+++the change log overkill, you may only submit the first line 
++summary.
+++    - As a general rule of thumb, if the change(s) can be broken 
+++into at least 3 high-level descriptions of non-overlapping tasks 
++and
+++non-redundant change log entries, then do NOT omit the change log.
+++
+++> > [!IMPORTANT]
+++> BE CAREFUL TO ONLY OUTPUT THE ACTUAL COMMIT MESSAGE. I DON'T 
+CARE
+++HOW YOU ARRIVED AT IT, AND I DON'T WANT TO SEE "Here's an 
+idiomatic
+++commit message for you!" ETC...
+++
+++**WARNING** IF YOU FAIL TO ADHERE TO THE ABOVE YOU WILL BE FINED 
+++$1000
+++
+++/tmp/d
+++
+++
++```/tmp/d
+++diff --git a/commit_message.txt b/commit_message.txt
+++new file mode 100644
+++index 0000000..278ae06
+++--- /dev/null
++++++ b/commit_message.txt
+++@@ -0,0 +1,8 @@
++++feat: add new feature
++++
++++Add a new feature to improve user experience. This change 
++includes:
++++- Implementation of the new feature
++++- Updated documentation
++++- Added unit tests
++++
++++Closes #123
+++diff --git a/tastybeets b/tastybeets
+++new file mode 100644
+++index 0000000..e69de29
+++
+```
+++Assistant: Thinking...
++                                                                   
++Assistant: feat: add new feature to improve user experience
+++
+++- Implemented core functionality for new feature
+++- Updated documentation to reflect changes
+++- Added comprehensive unit test coverage
+++
+++Closes #123
++diff --git a/tastybeets b/tastybeets
++new file mode 100644
++index 0000000..e69de29
++```
++Assistant: Thinking...
+                                                                    
+Assistant: feat: add new feature to improve user experience
++
++- Implemented core functionality for new feature
++- Updated documentation to reflect changes
++- Added comprehensive unit test coverage
++
++Closes #123
+```
+Assistant: Thinking...                                                                    Assistant: docs: update README and add commit message template
+
+- Simplified README tagline for clarity
+- Added commit_message.txt as a template for future commits
+- Created responly file to store tool responses

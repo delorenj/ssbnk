@@ -1,6 +1,6 @@
 # 📸 ssbnk (ScreenShot Bank)
 
-> _Pronounced "spank" - because your screenshots deserve a good hosting!_
+> \_Pronounced "spank", obviously
 
 A dead simple, lightning-fast screenshot hosting service designed for developers, content creators, and anyone who needs instant screenshot sharing. Built with LLM workflows in mind but perfect for any use case.
 
