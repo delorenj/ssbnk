@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -117,8 +119,80 @@ func main() {
 	log.Printf("Watching for screenshots in %s", config.WatchDir)
 	log.Printf("Watching for videos in %s", config.VideoWatchDir)
 
+	// Start HTTP server for API endpoints
+	go startAPIServer(config)
+
 	// Keep the program running
 	select {}
+}
+
+func startAPIServer(config Config) {
+	http.HandleFunc("/latest", func(w http.ResponseWriter, r *http.Request) {
+		handleLatest(w, r, config)
+	})
+	http.HandleFunc("/latest/", func(w http.ResponseWriter, r *http.Request) {
+		handleLatest(w, r, config)
+	})
+
+	port := "8081"
+	log.Printf("Starting API server on port %s", port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Fatalf("Failed to start API server: %v", err)
+	}
+}
+
+func handleLatest(w http.ResponseWriter, r *http.Request, config Config) {
+	// Read all metadata files
+	metadataDir := filepath.Join(config.DataDir, "metadata")
+	files, err := os.ReadDir(metadataDir)
+	if err != nil {
+		http.Error(w, "Failed to read metadata directory", http.StatusInternalServerError)
+		return
+	}
+
+	var allMetadata []ScreenshotMetadata
+	for _, file := range files {
+		if strings.HasSuffix(file.Name(), ".json") {
+			filePath := filepath.Join(metadataDir, file.Name())
+			data, err := os.ReadFile(filePath)
+			if err != nil {
+				log.Printf("Warning: Failed to read metadata file %s: %v", file.Name(), err)
+				continue
+			}
+
+			var metadata ScreenshotMetadata
+			if err := json.Unmarshal(data, &metadata); err != nil {
+				log.Printf("Warning: Failed to unmarshal metadata file %s: %v", file.Name(), err)
+				continue
+			}
+			allMetadata = append(allMetadata, metadata)
+		}
+	}
+
+	// Sort by timestamp descending
+	sort.Slice(allMetadata, func(i, j int) bool {
+		return allMetadata[i].Timestamp.After(allMetadata[j].Timestamp)
+	})
+
+	// Get offset from URL path
+	offset := 0
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) > 1 {
+		if val, err := strconv.Atoi(parts[1]); err == nil {
+			offset = val
+		}
+	}
+
+	if offset >= len(allMetadata) {
+		http.Error(w, "Not found: offset is out of range", http.StatusNotFound)
+		return
+	}
+
+	// Get the target metadata
+	targetMetadata := allMetadata[offset]
+
+	// Redirect to the image URL
+	http.Redirect(w, r, targetMetadata.URL, http.StatusFound)
 }
 
 func processScreenshot(sourcePath string, config Config) error {
