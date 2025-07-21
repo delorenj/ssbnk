@@ -33,6 +33,26 @@ Retrieve a hosted screenshot.
 curl https://your-domain.com/hosted/20250714-1234.png
 ```
 
+### GET /latest/{offset}
+
+Redirects to the most recent screenshot.
+
+**Parameters**:
+- `offset` (integer, optional): The offset from the most recent screenshot. `0` (or no offset) is the most recent, `1` is the second most recent, and so on.
+
+**Response**:
+- `302 Found`: Redirects to the screenshot URL.
+- `404 Not Found`: No screenshots found or offset is out of range.
+
+**Example**:
+```bash
+# Get the latest screenshot
+curl -L https://your-domain.com/latest
+
+# Get the second to latest screenshot
+curl -L https://your-domain.com/latest/1
+```
+
 ### GET /
 
 Returns the default index page with service information.
