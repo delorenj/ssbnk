@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     volumes:
       # Screenshot watch directory
-      - ${SSBNK_IMAGE_DIR}:/watch
+      - ${SSBNK_SCREENSHOT_DIR}:/watch
       # Data persistence
       - ssbnk_data:/data
       # X11 support
