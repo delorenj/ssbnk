@@ -23,7 +23,9 @@ services:
     container_name: ssbnk-watcher
     restart: unless-stopped
     volumes:
-      - ./media:/media
+      - ${SSBNK_SCREENSHOT_DIR}:/media/screenshots
+      - ${SSBNK_SCREENCAST_DIR}:/media/screencasts
+      - ./web/html:/data/hosted
       # X11 support
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       # Wayland support - mount the runtime directory
@@ -37,8 +39,9 @@ services:
       - XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-wayland}
       # Application environment
       - SSBNK_URL=https://${SSBNK_DOMAIN}
-      - SSBNK_SCREENSHOT_DIR=${SSBNK_SCREENSHOT_DIR:-/media/screenshots}
-      - SSBNK_SCREENCAST_DIR=${SSBNK_SCREENCAST_DIR:-/media/screencasts}
+      - SSBNK_SCREENSHOT_DIR=/media/screenshots
+      - SSBNK_SCREENCAST_DIR=/media/screencasts
+      - SSBNK_DATA_DIR=/data
     network_mode: host # Needed for clipboard access
     privileged: true # Needed for clipboard access
 
@@ -47,7 +50,7 @@ services:
     container_name: ssbnk-cleanup
     restart: unless-stopped
     volumes:
-      - ./media:/media
+      - ./web/html:/data/hosted
       - ./scripts/cleanup.sh:/cleanup.sh:ro
     environment:
       - SSBNK_RETENTION_DAYS=${SSBNK_RETENTION_DAYS:-30}
