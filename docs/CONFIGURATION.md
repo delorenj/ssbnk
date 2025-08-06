@@ -6,10 +6,10 @@ This guide covers all configuration options for ssbnk.
 
 ### Required Variables
 
-| Variable          | Description                          | Example                      |
-| ----------------- | ------------------------------------ | ---------------------------- |
-| `SSBNK_URL`       | Your domain name (without https://)  | `screenshots.yourdomain.com` |
-| `SSBNK_IMAGE_DIR` | Directory where you save screenshots | `/home/username/screenshots` |
+| Variable               | Description                          | Example                      |
+| ---------------------- | ------------------------------------ | ---------------------------- |
+| `SSBNK_URL`            | Your domain name (without https://)  | `screenshots.yourdomain.com` |
+| `SSBNK_SCREENSHOT_DIR` | Directory where you save screenshots | `/home/username/screenshots` |
 
 ### Optional Variables
 
@@ -87,7 +87,7 @@ SSBNK_URL=your-custom-domain.com
 Update your `.env` file:
 
 ```bash
-SSBNK_IMAGE_DIR=/path/to/your/screenshots
+SSBNK_SCREENSHOT_DIR=/path/to/your/screenshots
 ```
 
 ### Custom Retention Period

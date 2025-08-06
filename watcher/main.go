@@ -31,23 +31,23 @@ type ScreenshotMetadata struct {
 }
 
 type Config struct {
-	WatchDir      string
-	VideoWatchDir string
+	ScreenshotDir      string
+	ScreencastDir string
 	DataDir       string
 	BaseURL       string
 }
 
 func main() {
 	config := Config{
-		WatchDir:      getEnv("SSBNK_IMAGE_DIR", "/watch"),
-		VideoWatchDir: getEnv("SSBNK_VIDEO_DIR", "/videos"),
+		ScreenshotDir:      getEnv("SSBNK_SCREENSHOT_DIR", "/media/screenshots"),
+		ScreencastDir: getEnv("SSBNK_SCREENCAST_DIR", "/media/screencasts"),
 		DataDir:       getEnv("SSBNK_DATA_DIR", "/data"),
-		BaseURL:       getEnv("SSBNK_URL", "https://screenshots.yourdomain.com"),
+		BaseURL:       getEnv("SSBNK_URL", "https://ss.yourdomain.com"),
 	}
 
 	log.Printf("Starting ssbnk watcher...")
-	log.Printf("Watch directory: %s", config.WatchDir)
-	log.Printf("Video watch directory: %s", config.VideoWatchDir)
+	log.Printf("Screenshot directory: %s", config.ScreenshotDir)
+	log.Printf("Video watch directory: %s", config.ScreencastDir)
 	log.Printf("Data directory: %s", config.DataDir)
 	log.Printf("Base URL: %s", config.BaseURL)
 
@@ -106,18 +106,18 @@ func main() {
 		}
 	}()
 
-	err = watcher.Add(config.WatchDir)
+	err = watcher.Add(config.ScreenshotDir)
 	if err != nil {
 		log.Fatal("Failed to add watch directory:", err)
 	}
 
-	err = watcher.Add(config.VideoWatchDir)
+	err = watcher.Add(config.ScreencastDir)
 	if err != nil {
 		log.Fatal("Failed to add video watch directory:", err)
 	}
 
-	log.Printf("Watching for screenshots in %s", config.WatchDir)
-	log.Printf("Watching for videos in %s", config.VideoWatchDir)
+	log.Printf("Watching for screenshots in %s", config.ScreenshotDir)
+	log.Printf("Watching for videos in %s", config.ScreencastDir)
 
 	// Start HTTP server for API endpoints
 	go startAPIServer(config)
@@ -253,6 +253,9 @@ func processScreenshot(sourcePath string, config Config) error {
 			if err := copyToClipboard(url); err != nil {
 				log.Printf("Warning: Failed to copy to clipboard: %v", err)
 			}
+
+			// Play notification sound for GIF
+			playNotificationSound()
 
 			// Open GIF in browser
 			log.Printf("Opening GIF in browser: %s", url)
@@ -451,6 +454,9 @@ func processVideo(sourcePath string, config Config) error {
 	if err := copyToClipboard(url); err != nil {
 		log.Printf("Warning: Failed to copy to clipboard: %v", err)
 	}
+
+	// Play notification sound
+	playNotificationSound()
 
 	// Open GIF in browser
 	log.Printf("Opening GIF in browser: %s", url)
@@ -760,4 +766,26 @@ func copyFile(src, dst string) error {
 		return fmt.Errorf("failed to copy file: %w", err)
 	}
 	return nil
+}
+
+func playNotificationSound() {
+	// Generate a simple beep sound using ffplay (part of ffmpeg)
+	// This creates a 0.2 second sine wave at 800Hz
+	cmd := exec.Command("ffplay",
+		"-nodisp",
+		"-autoexit",
+		"-f", "lavfi",
+		"-i", "sine=frequency=800:duration=0.2",
+	)
+
+	// Run in background so it doesn't block
+	go func() {
+		if err := cmd.Run(); err != nil {
+			// If ffplay fails, try alternative methods
+			// Try using the system beep
+			if beepCmd := exec.Command("printf", "\a"); beepCmd.Run() != nil {
+				log.Printf("Warning: Failed to play notification sound: %v", err)
+			}
+		}
+	}()
 }

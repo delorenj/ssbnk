@@ -1,167 +1,265 @@
-# CLAUDE.md
+# Claude Code Configuration - SPARC Development Environment
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## 🚨 CRITICAL: CONCURRENT EXECUTION & FILE MANAGEMENT
+
+**ABSOLUTE RULES**:
+1. ALL operations MUST be concurrent/parallel in a single message
+2. **NEVER save working files, text/mds and tests to the root folder**
+3. ALWAYS organize files in appropriate subdirectories
+
+### ⚡ GOLDEN RULE: "1 MESSAGE = ALL RELATED OPERATIONS"
+
+**MANDATORY PATTERNS:**
+- **TodoWrite**: ALWAYS batch ALL todos in ONE call (5-10+ todos minimum)
+- **Task tool**: ALWAYS spawn ALL agents in ONE message with full instructions
+- **File operations**: ALWAYS batch ALL reads/writes/edits in ONE message
+- **Bash commands**: ALWAYS batch ALL terminal operations in ONE message
+- **Memory operations**: ALWAYS batch ALL memory store/retrieve in ONE message
+
+### 📁 File Organization Rules
+
+**NEVER save to root folder. Use these directories:**
+- `/src` - Source code files
+- `/tests` - Test files
+- `/docs` - Documentation and markdown files
+- `/config` - Configuration files
+- `/scripts` - Utility scripts
+- `/examples` - Example code
 
 ## Project Overview
 
-ssbnk (ScreenShot Bank) is a containerized screenshot and screencast hosting service that automatically detects, processes, and hosts screenshots with URL clipboard integration. It also converts video screencasts to looping GIFs. Built with Go for the file watcher, Nginx for serving, FFmpeg for video conversion, and integrated with Traefik for reverse proxy.
+This project uses SPARC (Specification, Pseudocode, Architecture, Refinement, Completion) methodology with Claude-Flow orchestration for systematic Test-Driven Development.
 
-## Common Development Commands
+## SPARC Commands
 
-### Building and Running
+### Core Commands
+- `npx claude-flow sparc modes` - List available modes
+- `npx claude-flow sparc run <mode> "<task>"` - Execute specific mode
+- `npx claude-flow sparc tdd "<feature>"` - Run complete TDD workflow
+- `npx claude-flow sparc info <mode>` - Get mode details
+
+### Batchtools Commands
+- `npx claude-flow sparc batch <modes> "<task>"` - Parallel execution
+- `npx claude-flow sparc pipeline "<task>"` - Full pipeline processing
+- `npx claude-flow sparc concurrent <mode> "<tasks-file>"` - Multi-task processing
+
+### Build Commands
+- `npm run build` - Build project
+- `npm run test` - Run tests
+- `npm run lint` - Linting
+- `npm run typecheck` - Type checking
+
+## SPARC Workflow Phases
+
+1. **Specification** - Requirements analysis (`sparc run spec-pseudocode`)
+2. **Pseudocode** - Algorithm design (`sparc run spec-pseudocode`)
+3. **Architecture** - System design (`sparc run architect`)
+4. **Refinement** - TDD implementation (`sparc tdd`)
+5. **Completion** - Integration (`sparc run integration`)
+
+## Code Style & Best Practices
+
+- **Modular Design**: Files under 500 lines
+- **Environment Safety**: Never hardcode secrets
+- **Test-First**: Write tests before implementation
+- **Clean Architecture**: Separate concerns
+- **Documentation**: Keep updated
+
+## 🚀 Available Agents (54 Total)
+
+### Core Development
+`coder`, `reviewer`, `tester`, `planner`, `researcher`
+
+### Swarm Coordination
+`hierarchical-coordinator`, `mesh-coordinator`, `adaptive-coordinator`, `collective-intelligence-coordinator`, `swarm-memory-manager`
+
+### Consensus & Distributed
+`byzantine-coordinator`, `raft-manager`, `gossip-coordinator`, `consensus-builder`, `crdt-synchronizer`, `quorum-manager`, `security-manager`
+
+### Performance & Optimization
+`perf-analyzer`, `performance-benchmarker`, `task-orchestrator`, `memory-coordinator`, `smart-agent`
+
+### GitHub & Repository
+`github-modes`, `pr-manager`, `code-review-swarm`, `issue-tracker`, `release-manager`, `workflow-automation`, `project-board-sync`, `repo-architect`, `multi-repo-swarm`
+
+### SPARC Methodology
+`sparc-coord`, `sparc-coder`, `specification`, `pseudocode`, `architecture`, `refinement`
+
+### Specialized Development
+`backend-dev`, `mobile-dev`, `ml-developer`, `cicd-engineer`, `api-docs`, `system-architect`, `code-analyzer`, `base-template-generator`
+
+### Testing & Validation
+`tdd-london-swarm`, `production-validator`
+
+### Migration & Planning
+`migration-planner`, `swarm-init`
+
+## 🎯 Claude Code vs MCP Tools
+
+### Claude Code Handles ALL:
+- File operations (Read, Write, Edit, MultiEdit, Glob, Grep)
+- Code generation and programming
+- Bash commands and system operations
+- Implementation work
+- Project navigation and analysis
+- TodoWrite and task management
+- Git operations
+- Package management
+- Testing and debugging
+
+### MCP Tools ONLY:
+- Coordination and planning
+- Memory management
+- Neural features
+- Performance tracking
+- Swarm orchestration
+- GitHub integration
+
+**KEY**: MCP coordinates, Claude Code executes.
+
+## 🚀 Quick Setup
 
 ```bash
-# Start the service
-docker compose up -d
-
-# Build and restart the watcher service
-docker compose build ssbnk-watcher && docker compose up -d ssbnk-watcher
-
-# View logs for all services
-docker compose logs -f
-
-# View specific service logs
-docker compose logs -f ssbnk-watcher
-docker compose logs -f ssbnk-cleanup
+# Add Claude Flow MCP server
+claude mcp add claude-flow npx claude-flow@alpha mcp start
 ```
 
-### Testing and Debugging
+## MCP Tool Categories
 
+### Coordination
+`swarm_init`, `agent_spawn`, `task_orchestrate`
+
+### Monitoring
+`swarm_status`, `agent_list`, `agent_metrics`, `task_status`, `task_results`
+
+### Memory & Neural
+`memory_usage`, `neural_status`, `neural_train`, `neural_patterns`
+
+### GitHub Integration
+`github_swarm`, `repo_analyze`, `pr_enhance`, `issue_triage`, `code_review`
+
+### System
+`benchmark_run`, `features_detect`, `swarm_monitor`
+
+## 📋 Agent Coordination Protocol
+
+### Every Agent MUST:
+
+**1️⃣ BEFORE Work:**
 ```bash
-# Test screenshot processing manually
-./scripts/instant-screenshot.sh
-
-# Check display server configuration
-./scripts/detect-display-server.sh
-
-# Force sync a specific screenshot
-./scripts/force-screenshot-sync.sh /path/to/screenshot.png
-
-# Test cleanup process manually
-docker exec ssbnk-cleanup /cleanup.sh
-
-# Check clipboard functionality
-docker compose exec ssbnk-watcher which wl-copy  # Wayland
-docker compose exec ssbnk-watcher which xclip    # X11
+npx claude-flow@alpha hooks pre-task --description "[task]"
+npx claude-flow@alpha hooks session-restore --session-id "swarm-[id]"
 ```
 
-### Go Development
-
+**2️⃣ DURING Work:**
 ```bash
-# Run watcher locally (outside container)
-cd watcher
-go mod download
-go run main.go
-
-# Run tests
-cd watcher
-go test ./...
-
-# Build binary
-cd watcher
-go build -o ssbnk-watcher
+npx claude-flow@alpha hooks post-edit --file "[file]" --memory-key "swarm/[agent]/[step]"
+npx claude-flow@alpha hooks notify --message "[what was done]"
 ```
 
-## Architecture & Key Components
+**3️⃣ AFTER Work:**
+```bash
+npx claude-flow@alpha hooks post-task --task-id "[task]"
+npx claude-flow@alpha hooks session-end --export-metrics true
+```
 
-### Service Structure
+## 🎯 Concurrent Execution Examples
 
-1. **ssbnk-watcher** (Go service):
+### ✅ CORRECT (Single Message):
+```javascript
+[BatchTool]:
+  // Initialize swarm
+  mcp__claude-flow__swarm_init { topology: "mesh", maxAgents: 6 }
+  mcp__claude-flow__agent_spawn { type: "researcher" }
+  mcp__claude-flow__agent_spawn { type: "coder" }
+  mcp__claude-flow__agent_spawn { type: "tester" }
+  
+  // Spawn agents with Task tool
+  Task("Research agent: Analyze requirements...")
+  Task("Coder agent: Implement features...")
+  Task("Tester agent: Create test suite...")
+  
+  // Batch todos
+  TodoWrite { todos: [
+    {id: "1", content: "Research", status: "in_progress", priority: "high"},
+    {id: "2", content: "Design", status: "pending", priority: "high"},
+    {id: "3", content: "Implement", status: "pending", priority: "high"},
+    {id: "4", content: "Test", status: "pending", priority: "medium"},
+    {id: "5", content: "Document", status: "pending", priority: "low"}
+  ]}
+  
+  // File operations
+  Bash "mkdir -p app/{src,tests,docs}"
+  Write "app/src/index.js"
+  Write "app/tests/index.test.js"
+  Write "app/docs/README.md"
+```
 
-   - File watching with fsnotify for both screenshots and videos
-   - Screenshot processing and metadata generation
-   - Video to GIF conversion using FFmpeg (max 10 seconds, optimized palette)
-   - Multi-method clipboard integration (direct, FIFO bridge, HTTP service)
-   - Display server agnostic (X11/Wayland auto-detection)
-   - Watches two directories: screenshots and ~/Videos/Screencasts
+### ❌ WRONG (Multiple Messages):
+```javascript
+Message 1: mcp__claude-flow__swarm_init
+Message 2: Task("agent 1")
+Message 3: TodoWrite { todos: [single todo] }
+Message 4: Write "file.js"
+// This breaks parallel coordination!
+```
 
-2. **ssbnk-web** (Nginx):
+## Performance Benefits
 
-   - Serves hosted screenshots at `${SSBNK_DOMAIN}/hosted/`
-   - Optimized caching headers
-   - Connected to Traefik proxy network
+- **84.8% SWE-Bench solve rate**
+- **32.3% token reduction**
+- **2.8-4.4x speed improvement**
+- **27+ neural models**
 
-3. **ssbnk-cleanup** (Alpine cron):
-   - Daily cleanup at 2 AM
-   - Archives old screenshots based on retention policy
-   - Manages metadata and orphaned files
-   - Preserves marked screenshots
+## Hooks Integration
 
-### Key Code Paths
+### Pre-Operation
+- Auto-assign agents by file type
+- Validate commands for safety
+- Prepare resources automatically
+- Optimize topology by complexity
+- Cache searches
 
-- `watcher/main.go`: Core file watching and processing logic
-- `scripts/cleanup.sh`: Archive and cleanup implementation
-- `compose.yml`: Service orchestration and configuration
-- `nginx/default.conf`: Web server routing configuration
+### Post-Operation
+- Auto-format code
+- Train neural patterns
+- Update memory
+- Analyze performance
+- Track token usage
 
-### Display Server Integration
+### Session Management
+- Generate summaries
+- Persist state
+- Track metrics
+- Restore context
+- Export workflows
 
-The watcher supports both X11 and Wayland with automatic detection:
+## Advanced Features (v2.0.0)
 
-- Primary method: Direct clipboard access (xclip/wl-copy)
-- Fallback 1: FIFO bridge at `/tmp/ssbnk-clipboard`
-- Fallback 2: HTTP clipboard service on port 9999
+- 🚀 Automatic Topology Selection
+- ⚡ Parallel Execution (2.8-4.4x speed)
+- 🧠 Neural Training
+- 📊 Bottleneck Analysis
+- 🤖 Smart Auto-Spawning
+- 🛡️ Self-Healing Workflows
+- 💾 Cross-Session Memory
+- 🔗 GitHub Integration
 
-Detection order:
+## Integration Tips
 
-1. Check `WAYLAND_DISPLAY` environment variable
-2. Check `XDG_SESSION_TYPE` for "wayland"
-3. Test wl-copy availability and connectivity
-4. Default to X11/xclip
+1. Start with basic swarm init
+2. Scale agents gradually
+3. Use memory for context
+4. Monitor progress regularly
+5. Train patterns from success
+6. Enable hooks automation
+7. Use GitHub tools first
 
-### Data Flow
+## Support
 
-Screenshots:
+- Documentation: https://github.com/ruvnet/claude-flow
+- Issues: https://github.com/ruvnet/claude-flow/issues
 
-1. User saves screenshot to `${SSBNK_IMAGE_DIR}`
-2. Watcher detects new file via fsnotify
-3. File is moved to `/data/hosted/` with timestamp naming
-4. Metadata JSON created in `/data/metadata/`
-5. URL copied to clipboard
-6. Original file removed from watch directory
-7. Daily cleanup archives old files to `/data/archive/YYYY-MM-DD/`
+---
 
-Videos:
-
-1. User saves video to `~/Videos/Screencasts`
-2. Watcher detects new video file
-3. FFmpeg converts video to GIF (10 sec max, 640px width, optimized palette)
-4. GIF is placed in screenshot watch directory
-5. GIF processed as regular screenshot (hosted, URL copied)
-6. Original video file removed
-
-## Important Implementation Details
-
-- File operations use copy+remove (not rename) for cross-volume compatibility
-- Unique filename generation handles collisions with counter suffix
-- Metadata includes preserve flag to prevent archival
-- Clipboard integration has three fallback methods for reliability
-- Archive cleanup removes directories older than retention period
-- All timestamps use ISO format for consistent sorting
-- Video conversion uses FFmpeg with optimized settings:
-  - 10 second limit to keep GIF sizes reasonable
-  - 640px width with proportional height
-  - Palette generation for better color quality
-  - 10 fps for smooth playback
-- Supported video formats: MP4, AVI, MOV, MKV, WebM, FLV, WMV
-
-## Environment Configuration
-
-Required environment variables (from root `.env`):
-
-- `SSBNK_URL`: Full HTTPS URL for hosted screenshots
-- `SSBNK_DOMAIN`: Domain for Traefik routing
-- `SSBNK_IMAGE_DIR`: Local directory to watch for screenshots
-- `SSBNK_RETENTION_DAYS`: Days to retain screenshots (default: 30)
-- Display variables: `DISPLAY`, `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR`
-
-## DeLoContainers Integration
-
-This service follows DeLoContainers standards:
-
-- Service at `stacks/utils/ssbnk/`
-- Traefik routing via Docker labels
-- Connected to shared `proxy` network
-- Environment from root `.env` file
-- No version key in compose.yml
-
+Remember: **Claude Flow coordinates, Claude Code creates!**

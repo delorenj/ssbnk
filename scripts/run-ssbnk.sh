@@ -12,19 +12,19 @@ echo ""
 
 # Configuration
 SSBNK_URL=${SSBNK_URL:-"https://screenshots.example.com"}
-SSBNK_IMAGE_DIR=${SSBNK_IMAGE_DIR:-"$HOME/screenshots"}
+SSBNK_SCREENSHOT_DIR=${SSBNK_SCREENSHOT_DIR:-"$HOME/screenshots"}
 SSBNK_RETENTION_DAYS=${SSBNK_RETENTION_DAYS:-30}
 
 echo "🔧 Configuration:"
-echo "  📁 Watch Directory: $SSBNK_IMAGE_DIR"
+echo "  📁 Watch Directory: $SSBNK_SCREENSHOT_DIR"
 echo "  🌐 Service URL: $SSBNK_URL"
 echo "  🗑️  Retention Days: $SSBNK_RETENTION_DAYS"
 echo ""
 
 # Create screenshot directory if it doesn't exist
-if [ ! -d "$SSBNK_IMAGE_DIR" ]; then
-  echo "📁 Creating screenshot directory: $SSBNK_IMAGE_DIR"
-  mkdir -p "$SSBNK_IMAGE_DIR"
+if [ ! -d "$SSBNK_SCREENSHOT_DIR" ]; then
+  echo "📁 Creating screenshot directory: $SSBNK_SCREENSHOT_DIR"
+  mkdir -p "$SSBNK_SCREENSHOT_DIR"
 fi
 
 # Detect display server
@@ -59,7 +59,7 @@ docker run -d \
   --restart unless-stopped \
   --network host \
   --privileged \
-  -v "$SSBNK_IMAGE_DIR:/watch" \
+  -v "$SSBNK_SCREENSHOT_DIR:/watch" \
   -v ssbnk_data:/data \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   -v "${XDG_RUNTIME_DIR:-/run/user/1000}:/run/user/1000:rw" \
@@ -73,7 +73,7 @@ echo ""
 echo "✅ ssbnk is now running!"
 echo ""
 echo "📋 Next steps:"
-echo "  1. Take a screenshot and save it to: $SSBNK_IMAGE_DIR"
+echo "  1. Take a screenshot and save it to: $SSBNK_SCREENSHOT_DIR"
 echo "  2. The URL will be automatically copied to your clipboard"
 echo "  3. Your screenshot will be available at: $SSBNK_URL/hosted/[filename]"
 echo ""
