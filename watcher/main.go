@@ -431,7 +431,7 @@ func processVideo(sourcePath string, config Config) error {
 	}
 
 	// Generate URL
-	url := fmt.Sprintf("%s/hosted/%s", config.BaseURL, gifFilename)
+	url := fmt.Sprintf("%s/%s", config.BaseURL, gifFilename)
 
 	// Create metadata
 	metadata := ScreenshotMetadata{
