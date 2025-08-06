@@ -230,7 +230,7 @@ func processScreenshot(sourcePath string, config Config) error {
 			}
 
 			// Generate URL with original filename
-			url := fmt.Sprintf("%s/hosted/%s", config.BaseURL, filepath.Base(destPath))
+			url := fmt.Sprintf("%s/%s", config.BaseURL, filepath.Base(destPath))
 
 			// Create metadata
 			metadata := ScreenshotMetadata{
@@ -311,7 +311,7 @@ func processScreenshot(sourcePath string, config Config) error {
 	}
 
 	// Generate URL
-	url := fmt.Sprintf("%s/hosted/%s", config.BaseURL, newFilename)
+	url := fmt.Sprintf("%s/%s", config.BaseURL, newFilename)
 
 	// Create metadata
 	metadata := ScreenshotMetadata{
