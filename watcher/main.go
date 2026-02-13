@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,7 +33,7 @@ type ScreenshotMetadata struct {
 }
 
 type Config struct {
-	ScreenshotDir      string
+	ScreenshotDir string
 	ScreencastDir string
 	DataDir       string
 	BaseURL       string
@@ -39,7 +41,7 @@ type Config struct {
 
 func main() {
 	config := Config{
-		ScreenshotDir:      getEnv("SSBNK_SCREENSHOT_DIR", "/media/screenshots"),
+		ScreenshotDir: getEnv("SSBNK_SCREENSHOT_DIR", "/media/screenshots"),
 		ScreencastDir: getEnv("SSBNK_SCREENCAST_DIR", "/media/screencasts"),
 		DataDir:       getEnv("SSBNK_DATA_DIR", "/data"),
 		BaseURL:       getEnv("SSBNK_URL", "https://ss.yourdomain.com"),
@@ -81,14 +83,16 @@ func main() {
 				if !ok {
 					return
 				}
-				// For screenshots, process on create (they're saved instantly)
-				if event.Op&fsnotify.Create == fsnotify.Create && isImageFile(event.Name) {
+				// For screenshots, process on create/rename in a goroutine so the watcher loop never blocks.
+				if (event.Op&fsnotify.Create == fsnotify.Create || event.Op&fsnotify.Rename == fsnotify.Rename) && isImageFile(event.Name) {
 					log.Printf("New screenshot detected: %s", event.Name)
-					// Small delay to ensure file is fully written
-					time.Sleep(100 * time.Millisecond)
-					if err := processScreenshot(event.Name, config); err != nil {
-						log.Printf("Error processing screenshot: %v", err)
-					}
+					go func(path string) {
+						// Small delay to ensure file is fully written
+						time.Sleep(100 * time.Millisecond)
+						if err := processScreenshot(path, config); err != nil {
+							log.Printf("Error processing screenshot: %v", err)
+						}
+					}(event.Name)
 				}
 
 				// For videos, we need to track them and wait for write completion
@@ -122,16 +126,41 @@ func main() {
 	// Start HTTP server for API endpoints
 	go startAPIServer(config)
 
+	// Start memory logger
+	go logMemoryUsage()
+
 	// Keep the program running
 	select {}
 }
 
 func startAPIServer(config Config) {
+	// Original metadata-dependent endpoint (kept for backward compatibility)
 	http.HandleFunc("/latest", func(w http.ResponseWriter, r *http.Request) {
 		handleLatest(w, r, config)
 	})
 	http.HandleFunc("/latest/", func(w http.ResponseWriter, r *http.Request) {
 		handleLatest(w, r, config)
+	})
+
+	// NEW: Hybrid endpoint - metadata first, filesystem fallback
+	http.HandleFunc("/hybrid", func(w http.ResponseWriter, r *http.Request) {
+		handleLatestHybrid(w, r, config)
+	})
+	http.HandleFunc("/hybrid/", func(w http.ResponseWriter, r *http.Request) {
+		handleLatestHybrid(w, r, config)
+	})
+
+	// NEW: Pure filesystem endpoint (completely stateless)
+	http.HandleFunc("/stateless", func(w http.ResponseWriter, r *http.Request) {
+		handleLatestStateless(w, r, config)
+	})
+	http.HandleFunc("/stateless/", func(w http.ResponseWriter, r *http.Request) {
+		handleLatestStateless(w, r, config)
+	})
+
+	// NEW: Health check endpoint with metadata consistency validation
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		handleHealthCheck(w, r, config)
 	})
 
 	port := "8081"
@@ -141,18 +170,34 @@ func startAPIServer(config Config) {
 	}
 }
 
+func logMemoryUsage() {
+	for {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		log.Printf("MEM: Alloc = %v MiB, TotalAlloc = %v MiB, Sys = %v MiB, NumGC = %v",
+			m.Alloc/1024/1024, m.TotalAlloc/1024/1024, m.Sys/1024/1024, m.NumGC)
+		time.Sleep(30 * time.Second)
+	}
+}
+
 func handleLatest(w http.ResponseWriter, r *http.Request, config Config) {
+	log.Printf("Handling /latest request: %s", r.URL.Path)
+
 	// Read all metadata files
 	metadataDir := filepath.Join(config.DataDir, "metadata")
+	log.Printf("Reading metadata directory: %s", metadataDir)
 	files, err := os.ReadDir(metadataDir)
 	if err != nil {
+		log.Printf("Error reading metadata directory: %v", err)
 		http.Error(w, "Failed to read metadata directory", http.StatusInternalServerError)
 		return
 	}
 
 	var allMetadata []ScreenshotMetadata
+	log.Printf("Found %d files in metadata directory", len(files))
 	for _, file := range files {
 		if strings.HasSuffix(file.Name(), ".json") {
+			log.Printf("Processing metadata file: %s", file.Name())
 			filePath := filepath.Join(metadataDir, file.Name())
 			data, err := os.ReadFile(filePath)
 			if err != nil {
@@ -165,9 +210,11 @@ func handleLatest(w http.ResponseWriter, r *http.Request, config Config) {
 				log.Printf("Warning: Failed to unmarshal metadata file %s: %v", file.Name(), err)
 				continue
 			}
+			log.Printf("Successfully parsed metadata for: %s (timestamp: %s)", metadata.Filename, metadata.Timestamp)
 			allMetadata = append(allMetadata, metadata)
 		}
 	}
+	log.Printf("Total metadata entries loaded: %d", len(allMetadata))
 
 	// Sort by timestamp descending
 	sort.Slice(allMetadata, func(i, j int) bool {
@@ -177,22 +224,125 @@ func handleLatest(w http.ResponseWriter, r *http.Request, config Config) {
 	// Get offset from URL path
 	offset := 0
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	log.Printf("URL path: %s, parts: %v", r.URL.Path, parts)
 	if len(parts) > 1 {
 		if val, err := strconv.Atoi(parts[1]); err == nil {
 			offset = val
+			log.Printf("Parsed offset: %d", offset)
 		}
+	} else {
+		log.Printf("No offset specified, using default: %d", offset)
 	}
 
+	log.Printf("Checking offset %d against %d total metadata entries", offset, len(allMetadata))
 	if offset >= len(allMetadata) {
+		log.Printf("Offset %d is out of range (have %d entries)", offset, len(allMetadata))
 		http.Error(w, "Not found: offset is out of range", http.StatusNotFound)
 		return
 	}
 
 	// Get the target metadata
 	targetMetadata := allMetadata[offset]
+	log.Printf("Redirecting to: %s", targetMetadata.URL)
 
 	// Redirect to the image URL
 	http.Redirect(w, r, targetMetadata.URL, http.StatusFound)
+}
+
+// NEW: Hybrid approach - tries metadata first, falls back to filesystem scan
+func handleLatestHybrid(w http.ResponseWriter, r *http.Request, config Config) {
+	log.Printf("🔄 Handling HYBRID /latest request: %s", r.URL.Path)
+
+	// Extract offset from URL
+	offset := parseOffsetFromURL(r.URL.Path)
+	log.Printf("📊 Requested offset: %d", offset)
+
+	// STRATEGY 1: Try metadata first (fast path)
+	log.Printf("🔍 HYBRID Step 1: Attempting metadata lookup...")
+	if metadata, success := tryMetadataLookup(config, offset); success {
+		log.Printf("✅ HYBRID Success: Found via metadata - %s", metadata.URL)
+
+		// Validate that the file actually exists (consistency check)
+		hostedPath := filepath.Join(config.DataDir, "hosted", metadata.Filename)
+		if fileExists(hostedPath) {
+			log.Printf("✅ HYBRID Validation: File exists on disk")
+			http.Redirect(w, r, metadata.URL, http.StatusFound)
+			return
+		} else {
+			log.Printf("⚠️  HYBRID Warning: Metadata found but file missing on disk: %s", hostedPath)
+			// Fall through to filesystem scan
+		}
+	}
+
+	// STRATEGY 2: Filesystem scan fallback (bulletproof path)
+	log.Printf("🔍 HYBRID Step 2: Falling back to filesystem scan...")
+	if url, success := tryFilesystemLookup(config, offset); success {
+		log.Printf("✅ HYBRID Success: Found via filesystem scan - %s", url)
+		http.Redirect(w, r, url, http.StatusFound)
+		return
+	}
+
+	// STRATEGY 3: Last resort - count actual files and give helpful error
+	actualCount := countActualFiles(config)
+	log.Printf("❌ HYBRID Failure: Offset %d not found. Actual file count: %d", offset, actualCount)
+
+	errorMsg := fmt.Sprintf("File not found at offset %d. Available files: %d", offset, actualCount)
+	http.Error(w, errorMsg, http.StatusNotFound)
+}
+
+// NEW: Pure filesystem approach - completely stateless and bulletproof
+func handleLatestStateless(w http.ResponseWriter, r *http.Request, config Config) {
+	log.Printf("🔄 Handling STATELESS /latest request: %s", r.URL.Path)
+
+	offset := parseOffsetFromURL(r.URL.Path)
+	log.Printf("📊 Requested offset: %d", offset)
+
+	// Direct filesystem scan - no metadata dependency
+	if url, success := tryFilesystemLookup(config, offset); success {
+		log.Printf("✅ STATELESS Success: Found via filesystem - %s", url)
+		http.Redirect(w, r, url, http.StatusFound)
+		return
+	}
+
+	actualCount := countActualFiles(config)
+	log.Printf("❌ STATELESS Failure: Offset %d not found. Actual file count: %d", offset, actualCount)
+
+	errorMsg := fmt.Sprintf("File not found at offset %d. Available files: %d", offset, actualCount)
+	http.Error(w, errorMsg, http.StatusNotFound)
+}
+
+// NEW: Health check with metadata consistency validation
+func handleHealthCheck(w http.ResponseWriter, r *http.Request, config Config) {
+	log.Printf("🔄 Handling HEALTH CHECK request")
+
+	type HealthStatus struct {
+		Status            string   `json:"status"`
+		MetadataCount     int      `json:"metadata_count"`
+		ActualFileCount   int      `json:"actual_file_count"`
+		ConsistencyIssues []string `json:"consistency_issues,omitempty"`
+		Timestamp         string   `json:"timestamp"`
+	}
+
+	health := HealthStatus{
+		Status:    "ok",
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	// Check metadata consistency
+	issues := checkMetadataConsistency(config)
+	health.ConsistencyIssues = issues
+	health.MetadataCount = len(loadAllMetadata(config))
+	health.ActualFileCount = countActualFiles(config)
+
+	if len(issues) > 0 {
+		health.Status = "warning"
+		log.Printf("⚠️  HEALTH: Found %d consistency issues", len(issues))
+	} else {
+		log.Printf("✅ HEALTH: All systems operational")
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(health)
 }
 
 func processScreenshot(sourcePath string, config Config) error {
@@ -500,13 +650,9 @@ func copyToClipboard(text string) error {
 	// First try: Direct clipboard access
 	var err error
 	if isWayland() {
-		cmd := exec.Command("wl-copy")
-		cmd.Stdin = strings.NewReader(text)
-		err = cmd.Run()
+		err = runClipboardCommand(2*time.Second, "wl-copy", text)
 	} else {
-		cmd := exec.Command("xclip", "-selection", "clipboard")
-		cmd.Stdin = strings.NewReader(text)
-		err = cmd.Run()
+		err = runClipboardCommand(2*time.Second, "xclip", text, "-selection", "clipboard")
 	}
 
 	if err == nil {
@@ -530,6 +676,23 @@ func copyToClipboard(text string) error {
 
 	log.Printf("❌ All clipboard methods failed")
 	return fmt.Errorf("all clipboard methods failed")
+}
+
+func runClipboardCommand(timeout time.Duration, cmdName, text string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, cmdName, args...)
+	cmd.Stdin = strings.NewReader(text)
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("%s timed out after %s", cmdName, timeout)
+		}
+		return err
+	}
+
+	return nil
 }
 
 func useClipboardBridge(text string) error {
@@ -766,6 +929,188 @@ func copyFile(src, dst string) error {
 		return fmt.Errorf("failed to copy file: %w", err)
 	}
 	return nil
+}
+
+// NEW: Helper function to parse offset from URL path
+func parseOffsetFromURL(urlPath string) int {
+	parts := strings.Split(strings.Trim(urlPath, "/"), "/")
+
+	// Handle URLs like "/hybrid/5" or "/stateless/10"
+	if len(parts) >= 2 {
+		if val, err := strconv.Atoi(parts[1]); err == nil {
+			return val
+		}
+	}
+
+	return 0 // default offset
+}
+
+// NEW: Try to lookup file via metadata (fast path)
+func tryMetadataLookup(config Config, offset int) (ScreenshotMetadata, bool) {
+	allMetadata := loadAllMetadata(config)
+
+	if len(allMetadata) == 0 {
+		log.Printf("🔍 Metadata lookup: No metadata files found")
+		return ScreenshotMetadata{}, false
+	}
+
+	// Sort by timestamp descending (same as original logic)
+	sort.Slice(allMetadata, func(i, j int) bool {
+		return allMetadata[i].Timestamp.After(allMetadata[j].Timestamp)
+	})
+
+	if offset >= len(allMetadata) {
+		log.Printf("🔍 Metadata lookup: Offset %d >= metadata count %d", offset, len(allMetadata))
+		return ScreenshotMetadata{}, false
+	}
+
+	return allMetadata[offset], true
+}
+
+// NEW: Try to lookup file via direct filesystem scan (bulletproof path)
+func tryFilesystemLookup(config Config, offset int) (string, bool) {
+	files := scanHostedFilesForLatest(config)
+
+	if len(files) == 0 {
+		log.Printf("🔍 Filesystem lookup: No files found in hosted directory")
+		return "", false
+	}
+
+	if offset >= len(files) {
+		log.Printf("🔍 Filesystem lookup: Offset %d >= file count %d", offset, len(files))
+		return "", false
+	}
+
+	filename := files[offset]
+	url := fmt.Sprintf("%s/%s", config.BaseURL, filename)
+	return url, true
+}
+
+// NEW: Scan hosted directory for files, return sorted by modification time (latest first)
+func scanHostedFilesForLatest(config Config) []string {
+	hostedDir := filepath.Join(config.DataDir, "hosted")
+
+	entries, err := os.ReadDir(hostedDir)
+	if err != nil {
+		log.Printf("⚠️  Error reading hosted directory: %v", err)
+		return []string{}
+	}
+
+	type FileInfo struct {
+		Name    string
+		ModTime time.Time
+	}
+
+	var files []FileInfo
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		// Only include image/gif files
+		if !isImageFile(entry.Name()) {
+			continue
+		}
+
+		fullPath := filepath.Join(hostedDir, entry.Name())
+		fileInfo, err := os.Stat(fullPath)
+		if err != nil {
+			log.Printf("⚠️  Error getting file info for %s: %v", entry.Name(), err)
+			continue
+		}
+
+		files = append(files, FileInfo{
+			Name:    entry.Name(),
+			ModTime: fileInfo.ModTime(),
+		})
+	}
+
+	// Sort by modification time descending (latest first)
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].ModTime.After(files[j].ModTime)
+	})
+
+	// Extract just the filenames
+	var result []string
+	for _, file := range files {
+		result = append(result, file.Name)
+	}
+
+	log.Printf("🔍 Filesystem scan found %d files", len(result))
+	return result
+}
+
+// NEW: Count actual files in hosted directory
+func countActualFiles(config Config) int {
+	return len(scanHostedFilesForLatest(config))
+}
+
+// NEW: Load all metadata files (extracted from original handleLatest)
+func loadAllMetadata(config Config) []ScreenshotMetadata {
+	metadataDir := filepath.Join(config.DataDir, "metadata")
+	files, err := os.ReadDir(metadataDir)
+	if err != nil {
+		log.Printf("⚠️  Error reading metadata directory: %v", err)
+		return []ScreenshotMetadata{}
+	}
+
+	var allMetadata []ScreenshotMetadata
+
+	for _, file := range files {
+		if strings.HasSuffix(file.Name(), ".json") {
+			filePath := filepath.Join(metadataDir, file.Name())
+			data, err := os.ReadFile(filePath)
+			if err != nil {
+				log.Printf("⚠️  Failed to read metadata file %s: %v", file.Name(), err)
+				continue
+			}
+
+			var metadata ScreenshotMetadata
+			if err := json.Unmarshal(data, &metadata); err != nil {
+				log.Printf("⚠️  Failed to unmarshal metadata file %s: %v", file.Name(), err)
+				continue
+			}
+
+			allMetadata = append(allMetadata, metadata)
+		}
+	}
+
+	return allMetadata
+}
+
+// NEW: Check metadata consistency against actual files
+func checkMetadataConsistency(config Config) []string {
+	var issues []string
+
+	// Get all metadata
+	allMetadata := loadAllMetadata(config)
+	hostedDir := filepath.Join(config.DataDir, "hosted")
+
+	// Check if metadata files have corresponding hosted files
+	for _, metadata := range allMetadata {
+		hostedPath := filepath.Join(hostedDir, metadata.Filename)
+		if !fileExists(hostedPath) {
+			issues = append(issues, fmt.Sprintf("Metadata references missing file: %s", metadata.Filename))
+		}
+	}
+
+	// Check if hosted files have corresponding metadata
+	actualFiles := scanHostedFilesForLatest(config)
+	metadataFilenames := make(map[string]bool)
+
+	for _, metadata := range allMetadata {
+		metadataFilenames[metadata.Filename] = true
+	}
+
+	for _, filename := range actualFiles {
+		if !metadataFilenames[filename] {
+			issues = append(issues, fmt.Sprintf("Hosted file missing metadata: %s", filename))
+		}
+	}
+
+	log.Printf("🔍 Consistency check: Found %d issues", len(issues))
+	return issues
 }
 
 func playNotificationSound() {
