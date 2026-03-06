@@ -1,0 +1,147 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /**
+   * Tailwind CSS theme
+   * tailwind.config.ts expects the following color variables to be expressed as HSL values.
+   * A different format will require also updating the theme in tailwind.config.ts.
+  */
+  :root {
+    --background: 252 255 255;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 255 255 255;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 255 255 255;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 263 85% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 252 253 255;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 247 248 250;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 263 85% 60%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 242 244 247;
+    --input: 242 244 247;
+    --ring: 263 85% 60%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    /* Asset Gallery Brand Colors - Modern purple/violet theme */
+    --gallery-50: 252 253 255;
+    --gallery-100: 245 246 252;
+    --gallery-200: 235 238 248;
+    --gallery-300: 216 222 240;
+    --gallery-400: 189 199 228;
+    --gallery-500: 263 85% 60%;
+    --gallery-600: 258 77% 52%;
+    --gallery-700: 253 71% 44%;
+    --gallery-800: 248 65% 36%;
+    --gallery-900: 243 59% 28%;
+    --gallery-950: 238 53% 20%;
+
+    /* Surface colors for cards and overlays */
+    --surface: 255 255 255;
+    --surface-hover: 252 253 255;
+    --surface-active: 247 248 250;
+
+    /* Status colors */
+    --success: 142 72% 29%;
+    --success-foreground: 0 0% 100%;
+    --warning: 43 89% 38%;
+    --warning-foreground: 0 0% 100%;
+  }
+
+  .dark {
+    --background: 224 27% 9%;
+    --foreground: 210 40% 98%;
+
+    --card: 229 24% 12%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 229 24% 12%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 263 85% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 233 21% 15%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 233 21% 15%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 263 85% 60%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 233 21% 18%;
+    --input: 233 21% 18%;
+    --ring: 263 85% 60%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    /* Dark mode gallery colors */
+    --gallery-50: 229 24% 12%;
+    --gallery-100: 233 21% 15%;
+    --gallery-200: 237 18% 18%;
+    --gallery-300: 241 15% 21%;
+    --gallery-400: 245 12% 24%;
+    --gallery-500: 263 85% 60%;
+    --gallery-600: 268 80% 65%;
+    --gallery-700: 273 75% 70%;
+    --gallery-800: 278 70% 75%;
+    --gallery-900: 283 65% 80%;
+    --gallery-950: 288 60% 85%;
+
+    /* Dark surface colors */
+    --surface: 229 24% 12%;
+    --surface-hover: 233 21% 15%;
+    --surface-active: 237 18% 18%;
+
+    /* Dark status colors */
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+    --warning: 43 96% 56%;
+    --warning-foreground: 43 100% 7%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}

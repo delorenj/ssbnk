@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -158,12 +159,17 @@ func startAPIServer(config Config) {
 		handleLatestStateless(w, r, config)
 	})
 
+	// Upload endpoint for remote machines
+	http.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
+		handleUpload(w, r, config)
+	})
+
 	// NEW: Health check endpoint with metadata consistency validation
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		handleHealthCheck(w, r, config)
 	})
 
-	port := "8081"
+	port := getEnv("SSBNK_API_PORT", "31243")
 	log.Printf("Starting API server on port %s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatalf("Failed to start API server: %v", err)
@@ -345,6 +351,128 @@ func handleHealthCheck(w http.ResponseWriter, r *http.Request, config Config) {
 	json.NewEncoder(w).Encode(health)
 }
 
+func handleUpload(w http.ResponseWriter, r *http.Request, config Config) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Validate API key
+	expectedKey := os.Getenv("SSBNK_UPLOAD_KEY")
+	if expectedKey == "" {
+		log.Printf("UPLOAD: SSBNK_UPLOAD_KEY not set, rejecting upload")
+		http.Error(w, "Upload not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	apiKey := r.Header.Get("X-Upload-Key")
+	if apiKey != expectedKey {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Parse multipart form (max 50MB)
+	if err := r.ParseMultipartForm(50 << 20); err != nil {
+		http.Error(w, "Failed to parse upload", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "No file provided", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Determine extension from original filename
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext == "" {
+		ext = ".png"
+	}
+
+	// Only allow image files
+	if ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".gif" && ext != ".webp" {
+		http.Error(w, "Only image files allowed", http.StatusBadRequest)
+		return
+	}
+
+	// Generate filename with timestamp
+	now := time.Now()
+	newFilename := fmt.Sprintf("%s%s", now.Format("20060102-1504"), ext)
+	destPath := filepath.Join(config.DataDir, "hosted", newFilename)
+
+	// Ensure unique filename
+	counter := 1
+	for fileExists(destPath) {
+		newFilename = fmt.Sprintf("%s-%d%s", now.Format("20060102-1504"), counter, ext)
+		destPath = filepath.Join(config.DataDir, "hosted", newFilename)
+		counter++
+	}
+
+	// Write the uploaded file
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		log.Printf("UPLOAD: Failed to create file: %v", err)
+		http.Error(w, "Failed to save file", http.StatusInternalServerError)
+		return
+	}
+	defer destFile.Close()
+
+	written, err := io.Copy(destFile, file)
+	if err != nil {
+		log.Printf("UPLOAD: Failed to write file: %v", err)
+		http.Error(w, "Failed to write file", http.StatusInternalServerError)
+		return
+	}
+
+	// Generate URL
+	url := fmt.Sprintf("%s/%s", config.BaseURL, newFilename)
+
+	// Create metadata
+	metadata := ScreenshotMetadata{
+		ID:           uuid.New().String(),
+		OriginalName: header.Filename,
+		Filename:     newFilename,
+		URL:          url,
+		Timestamp:    now,
+		Size:         written,
+		Preserve:     false,
+	}
+
+	metadataPath := filepath.Join(config.DataDir, "metadata", fmt.Sprintf("%s.json", metadata.ID))
+	if err := saveMetadata(metadata, metadataPath); err != nil {
+		log.Printf("UPLOAD: Failed to save metadata: %v", err)
+	}
+
+	// Track as last screenshot for paste-image support
+	writeLastScreenshotPath(destPath)
+
+	// Copy URL to clipboard so pasting on the host works immediately
+	if err := copyToClipboard(url); err != nil {
+		log.Printf("UPLOAD: Warning: Failed to copy to clipboard: %v", err)
+	}
+
+	log.Printf("UPLOAD: %s -> %s (%s)", header.Filename, url, formatBytes(written))
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"url":      url,
+		"filename": newFilename,
+	})
+}
+
+// writeLastScreenshotPath saves the path to the most recently processed image
+// so the paste-image script can copy it to clipboard as image data
+func writeLastScreenshotPath(hostedPath string) {
+	stateDir := "/tmp/ssbnk"
+	os.MkdirAll(stateDir, 0755)
+	// Write just the filename so the host-side paste-image script can resolve it
+	filename := filepath.Base(hostedPath)
+	if err := os.WriteFile(filepath.Join(stateDir, "last-screenshot"), []byte(filename), 0644); err != nil {
+		log.Printf("Warning: Failed to write last screenshot path: %v", err)
+	}
+}
+
 func processScreenshot(sourcePath string, config Config) error {
 	// Special handling for GIF files that might be from video conversion
 	if strings.HasSuffix(strings.ToLower(sourcePath), ".gif") {
@@ -398,6 +526,9 @@ func processScreenshot(sourcePath string, config Config) error {
 			if err := saveMetadata(metadata, metadataPath); err != nil {
 				log.Printf("Warning: Failed to save metadata: %v", err)
 			}
+
+			// Track for paste-image support
+			writeLastScreenshotPath(destPath)
 
 			// Copy URL to clipboard
 			if err := copyToClipboard(url); err != nil {
@@ -479,6 +610,9 @@ func processScreenshot(sourcePath string, config Config) error {
 	if err := saveMetadata(metadata, metadataPath); err != nil {
 		log.Printf("Warning: Failed to save metadata: %v", err)
 	}
+
+	// Track for paste-image support
+	writeLastScreenshotPath(destPath)
 
 	// Copy URL to clipboard
 	if err := copyToClipboard(url); err != nil {
@@ -599,6 +733,9 @@ func processVideo(sourcePath string, config Config) error {
 	if err := saveMetadata(metadata, metadataPath); err != nil {
 		log.Printf("Warning: Failed to save metadata: %v", err)
 	}
+
+	// Track for paste-image support
+	writeLastScreenshotPath(hostedGifPath)
 
 	// Copy URL to clipboard
 	if err := copyToClipboard(url); err != nil {
