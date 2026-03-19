@@ -97,7 +97,7 @@ func main() {
 				}
 
 				// For videos, we need to track them and wait for write completion
-				if event.Op&fsnotify.Create == fsnotify.Create && isVideoFile(event.Name) {
+				if (event.Op&fsnotify.Create == fsnotify.Create || event.Op&fsnotify.Rename == fsnotify.Rename) && isVideoFile(event.Name) {
 					log.Printf("Video recording started: %s", event.Name)
 					// Track this video file for completion
 					go trackVideoFile(event.Name, config)
@@ -135,45 +135,164 @@ func main() {
 }
 
 func startAPIServer(config Config) {
-	// Original metadata-dependent endpoint (kept for backward compatibility)
-	http.HandleFunc("/latest", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+
+	// API endpoints
+	mux.HandleFunc("/api/screenshots", func(w http.ResponseWriter, r *http.Request) {
+		handleAPIScreenshots(w, r, config)
+	})
+	mux.HandleFunc("/latest", func(w http.ResponseWriter, r *http.Request) {
 		handleLatest(w, r, config)
 	})
-	http.HandleFunc("/latest/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/latest/", func(w http.ResponseWriter, r *http.Request) {
 		handleLatest(w, r, config)
 	})
-
-	// NEW: Hybrid endpoint - metadata first, filesystem fallback
-	http.HandleFunc("/hybrid", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/hybrid", func(w http.ResponseWriter, r *http.Request) {
 		handleLatestHybrid(w, r, config)
 	})
-	http.HandleFunc("/hybrid/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/hybrid/", func(w http.ResponseWriter, r *http.Request) {
 		handleLatestHybrid(w, r, config)
 	})
-
-	// NEW: Pure filesystem endpoint (completely stateless)
-	http.HandleFunc("/stateless", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/stateless", func(w http.ResponseWriter, r *http.Request) {
 		handleLatestStateless(w, r, config)
 	})
-	http.HandleFunc("/stateless/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/stateless/", func(w http.ResponseWriter, r *http.Request) {
 		handleLatestStateless(w, r, config)
 	})
-
-	// Upload endpoint for remote machines
-	http.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
 		handleUpload(w, r, config)
 	})
-
-	// NEW: Health check endpoint with metadata consistency validation
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		handleHealthCheck(w, r, config)
 	})
 
-	port := getEnv("SSBNK_API_PORT", "31243")
-	log.Printf("Starting API server on port %s", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
-		log.Fatalf("Failed to start API server: %v", err)
+	// Static file servers
+	hostedDir := filepath.Join(config.DataDir, "hosted")
+	hostedFS := http.FileServer(http.Dir(hostedDir))
+	uiDir := getEnv("SSBNK_UI_DIR", "/ui")
+	uiFS := http.FileServer(http.Dir(uiDir))
+
+	// Root handler: route between UI and hosted screenshot files
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Astro static assets
+		if strings.HasPrefix(path, "/_astro/") || path == "/favicon.svg" {
+			uiFS.ServeHTTP(w, r)
+			return
+		}
+
+		// Image/gif files: serve from hosted directory
+		if isImageFile(path) {
+			hostedFS.ServeHTTP(w, r)
+			return
+		}
+
+		// Everything else: serve UI index.html (Astro static page)
+		http.ServeFile(w, r, filepath.Join(uiDir, "index.html"))
+	})
+
+	// Wrap with security headers and CORS
+	handler := withHeaders(mux)
+
+	port := getEnv("SSBNK_API_PORT", "80")
+	log.Printf("Starting server on port %s (static files + API)", port)
+	if err := http.ListenAndServe(":"+port, handler); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
 	}
+}
+
+// withHeaders adds security headers and CORS to all responses
+func withHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Upload-Key, X-API-Key")
+
+		// Cache static assets
+		if isImageFile(r.URL.Path) {
+			w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
+		}
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// handleAPIScreenshots returns screenshot metadata as JSON for the UI
+func handleAPIScreenshots(w http.ResponseWriter, r *http.Request, config Config) {
+	limit := 50
+	offset := 0
+
+	if val := r.URL.Query().Get("limit"); val != "" {
+		if v, err := strconv.Atoi(val); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	if val := r.URL.Query().Get("offset"); val != "" {
+		if v, err := strconv.Atoi(val); err == nil && v >= 0 {
+			offset = v
+		}
+	}
+
+	// Load metadata and sort by timestamp desc
+	allMetadata := loadAllMetadata(config)
+	sort.Slice(allMetadata, func(i, j int) bool {
+		return allMetadata[i].Timestamp.After(allMetadata[j].Timestamp)
+	})
+
+	// Fill gaps: include hosted files missing metadata
+	metadataFilenames := make(map[string]bool)
+	for _, m := range allMetadata {
+		metadataFilenames[m.Filename] = true
+	}
+	for _, filename := range scanHostedFilesForLatest(config) {
+		if !metadataFilenames[filename] {
+			hostedPath := filepath.Join(config.DataDir, "hosted", filename)
+			info, err := os.Stat(hostedPath)
+			if err != nil {
+				continue
+			}
+			allMetadata = append(allMetadata, ScreenshotMetadata{
+				Filename:  filename,
+				URL:       fmt.Sprintf("%s/%s", config.BaseURL, filename),
+				Timestamp: info.ModTime(),
+				Size:      info.Size(),
+			})
+		}
+	}
+
+	// Re-sort after adding gap fills
+	sort.Slice(allMetadata, func(i, j int) bool {
+		return allMetadata[i].Timestamp.After(allMetadata[j].Timestamp)
+	})
+
+	// Apply pagination
+	total := len(allMetadata)
+	if offset >= total {
+		allMetadata = []ScreenshotMetadata{}
+	} else {
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+		allMetadata = allMetadata[offset:end]
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"screenshots": allMetadata,
+		"total":       total,
+		"offset":      offset,
+		"limit":       limit,
+	})
 }
 
 func logMemoryUsage() {

@@ -1,14 +1,29 @@
 services:
-  ssbnk-web:
-    image: nginx:alpine
-    container_name: ssbnk-web
+  ssbnk-watcher:
+    build: ./watcher
+    container_name: ssbnk-watcher
     restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
-      - ./web/html:/usr/share/nginx/html
-      - ./web/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./web/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${SSBNK_SCREENSHOT_DIR}:/media/screenshots
+      - ${SSBNK_SCREENCAST_DIR}:/media/screencasts
+      - /home/delorenj/data/ssbnk/hosted:/data/hosted
+      - /home/delorenj/data/ssbnk/metadata:/data/metadata
+      - /tmp/ssbnk:/tmp/ssbnk
+      # Wayland clipboard access (unix socket, not network)
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}:/run/user/1000:rw
+      # X11 fallback
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
+      - XDG_RUNTIME_DIR=/run/user/1000
+      - XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-wayland}
+      - SSBNK_URL=https://${SSBNK_DOMAIN}
+      - SSBNK_SCREENSHOT_DIR=/media/screenshots
+      - SSBNK_SCREENCAST_DIR=/media/screencasts
+      - SSBNK_DATA_DIR=/data
+      - SSBNK_API_PORT=80
+      - SSBNK_UPLOAD_KEY=${SSBNK_UPLOAD_KEY}
     networks:
       - proxy
     labels:
@@ -20,44 +35,14 @@ services:
       - "traefik.http.services.ssbnk.loadbalancer.server.port=80"
       - "traefik.docker.network=proxy"
 
-  ssbnk-watcher:
-    build: ./watcher
-    container_name: ssbnk-watcher
-    restart: unless-stopped
-    volumes:
-      - ${SSBNK_SCREENSHOT_DIR}:/media/screenshots
-      - ${SSBNK_SCREENCAST_DIR}:/media/screencasts
-      - ./web/html:/data/hosted
-      - ./watcher-data/metadata:/data/metadata
-      # Shared state for paste-image support
-      - /tmp/ssbnk:/tmp/ssbnk
-      # X11 support
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      # Wayland support - mount the runtime directory
-      - ${XDG_RUNTIME_DIR:-/run/user/1000}:/run/user/1000:rw
-    environment:
-      # X11 environment
-      - DISPLAY=${DISPLAY:-:0}
-      # Wayland environment
-      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
-      - XDG_RUNTIME_DIR=/run/user/1000
-      - XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-wayland}
-      # Application environment
-      - SSBNK_URL=https://${SSBNK_DOMAIN}
-      - SSBNK_SCREENSHOT_DIR=/media/screenshots
-      - SSBNK_SCREENCAST_DIR=/media/screencasts
-      - SSBNK_DATA_DIR=/data
-      - SSBNK_API_PORT=31243
-      - SSBNK_UPLOAD_KEY=${SSBNK_UPLOAD_KEY}
-    network_mode: host # Needed for clipboard access
-    privileged: true # Needed for clipboard access
-
   ssbnk-cleanup:
     image: alpine:latest
     container_name: ssbnk-cleanup
     restart: unless-stopped
     volumes:
-      - ./web/html:/data/hosted
+      - /home/delorenj/data/ssbnk/hosted:/data/hosted
+      - /home/delorenj/data/ssbnk/metadata:/data/metadata
+      - /home/delorenj/data/ssbnk/archive:/data/archive
       - ./scripts/cleanup.sh:/cleanup.sh:ro
     environment:
       - SSBNK_RETENTION_DAYS=${SSBNK_RETENTION_DAYS:-30}

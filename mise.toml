@@ -1,0 +1,40 @@
+[tasks.build]
+description = "Build the watcher Docker image"
+run = "docker build -t delorenj/ssbnk-watcher:latest -f watcher/Dockerfile ."
+
+[tasks.tag]
+description = "Tag the watcher image with a git-derived version"
+run = """
+VERSION=${1:-$(git describe --tags --always --dirty 2>/dev/null || echo 'dev')}
+docker tag delorenj/ssbnk-watcher:latest delorenj/ssbnk-watcher:$VERSION
+echo "Tagged delorenj/ssbnk-watcher:$VERSION"
+"""
+
+[tasks.push]
+description = "Build and push the watcher image to registries"
+depends = ["build"]
+run = """
+VERSION=${1:-latest}
+docker push delorenj/ssbnk-watcher:latest
+if [ "$VERSION" != "latest" ]; then
+  docker push delorenj/ssbnk-watcher:$VERSION
+fi
+echo "Pushed delorenj/ssbnk-watcher:latest"
+"""
+
+[tasks.deploy]
+description = "Pull new image and restart the watcher in the stacks deployment"
+run = """
+cd /home/delorenj/docker/stacks/utils/ssbnk
+docker compose pull ssbnk-watcher
+docker compose up -d ssbnk-watcher
+echo "Deployed ssbnk-watcher"
+"""
+
+[tasks.test]
+description = "Run watcher Go tests"
+run = "cd watcher && go test ./..."
+
+[tasks.dev]
+description = "Run watcher locally for development"
+run = "cd watcher && go run main.go"

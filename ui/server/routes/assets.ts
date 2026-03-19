@@ -1,1 +1,0 @@
-// This file is no longer needed as the API is now proxied to the backend.
