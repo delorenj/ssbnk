@@ -1,6 +1,8 @@
 services:
   ssbnk-watcher:
-    build: ./watcher
+    build:
+      context: .
+      dockerfile: watcher/Dockerfile
     container_name: ssbnk-watcher
     restart: unless-stopped
     volumes:
