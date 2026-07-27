@@ -29,8 +29,8 @@ func TestGIFHandling(t *testing.T) {
 
 	// Create a test config
 	config := Config{
-		WatchDir:      watchDir,
-		VideoWatchDir: videoDir,
+		ScreenshotDir: watchDir,
+		ScreencastDir: videoDir,
 		DataDir:       filepath.Join(tempDir, "data"),
 		BaseURL:       "http://test.local",
 	}

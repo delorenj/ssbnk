@@ -69,23 +69,20 @@ Local Screenshots                 +---------------------------+
 
 ## Remote Machine Setup
 
-The remote uploader runs as a service on any machine in your Tailnet.
+The remote uploader runs as a user service on any machine that can reach your ssbnk host. The installer handles everything: dependencies, config, service registration, macOS privacy permissions, and an end-to-end test.
 
-**Linux** (systemd user service):
 ```bash
-# Config at ~/.config/ssbnk/remote.env
-# Script at ~/.local/bin/ssbnk-remote-upload
-# Service at ~/.config/systemd/user/ssbnk-remote-upload.service
-systemctl --user enable --now ssbnk-remote-upload
+# On the remote machine (Linux or macOS), from a cloned repo:
+scripts/install-remote-client.sh
 ```
 
-**macOS** (launchd):
-```bash
-# Config at ~/.config/ssbnk/remote.env
-# Script at ~/.local/bin/ssbnk-remote-upload
-# Plist at ~/Library/LaunchAgents/sh.delo.ss.remote-upload.plist
-launchctl load ~/Library/LaunchAgents/sh.delo.ss.remote-upload.plist
-```
+You'll be asked for `SSBNK_HOST`, `SSBNK_UPLOAD_KEY`, and the screenshot directory (defaults: `~/Screenshots` on Linux, `~/Desktop` on macOS) — saved to `~/.config/ssbnk/remote.env`.
+
+**Linux**: installs a systemd user service (`~/.config/systemd/user/ssbnk-remote-upload.service`). Requires `inotify-tools`.
+
+**macOS**: installs a launchd agent (`~/Library/LaunchAgents/sh.delo.ss.remote-upload.plist`). Requires `fswatch` (the installer offers to `brew install` it). If your screenshots save to Desktop/Documents/Downloads, macOS requires a one-time privacy grant — the installer detects this, shows you exactly where to click in System Settings, and waits until the permission is in place before finishing.
+
+Both paths end with an end-to-end test: a probe screenshot is dropped into your watch folder and the installer confirms it lands on the host.
 
 ## API Endpoints
 
@@ -102,7 +99,8 @@ launchctl load ~/Library/LaunchAgents/sh.delo.ss.remote-upload.plist
 | Script | Purpose |
 |---|---|
 | `scripts/paste-image.sh` | Paste last screenshot as image via Ctrl+Shift+V |
-| `scripts/remote-screenshot-upload.sh` | Reference uploader script for remote machines |
+| `scripts/remote-screenshot-upload.sh` | Uploader that runs on remote machines (inotifywait/fswatch → POST /upload) |
+| `scripts/install-remote-client.sh` | Interactive remote-client installer (service registration, macOS privacy wizard, e2e test) |
 | `scripts/cleanup.sh` | Retention-based file cleanup (runs via cron container) |
 
 ## License

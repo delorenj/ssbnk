@@ -1,0 +1,49 @@
+{
+  "repository_type": "multi-part",
+  "parts": [
+    {
+      "part_id": "watcher",
+      "display_name": "Watcher/API (Go)",
+      "project_type_id": "backend",
+      "root_path": "watcher/",
+      "entry_point": "watcher/main.go",
+      "tech_stack": "Go 1.21, fsnotify, google/uuid, ffmpeg (subprocess)"
+    },
+    {
+      "part_id": "ui",
+      "display_name": "Management UI (Astro/React)",
+      "project_type_id": "web",
+      "root_path": "ui/",
+      "entry_point": "ui/src/pages/index.astro",
+      "tech_stack": "Astro 6, React 19, TypeScript, Tailwind 4, shadcn (@base-ui/react)",
+      "notes": "Has its own .git directory (separate repo). Static build served by the watcher."
+    },
+    {
+      "part_id": "web",
+      "display_name": "Nginx Static Hosting (legacy)",
+      "project_type_id": "infra",
+      "root_path": "web/",
+      "entry_point": "web/default.conf",
+      "tech_stack": "Nginx",
+      "notes": "Retired 3-container architecture; only used by the packaged all-in-one image. web/html/ holds live hosted assets."
+    },
+    {
+      "part_id": "scripts",
+      "display_name": "Remote/Automation Scripts (Bash)",
+      "project_type_id": "cli",
+      "root_path": "scripts/",
+      "entry_point": "scripts/paste-image.sh, scripts/remote-screenshot-upload.sh, scripts/cleanup.sh",
+      "tech_stack": "Bash/POSIX sh, inotifywait, wl-clipboard, ydotool, curl",
+      "notes": "Roughly half the scripts are legacy (Syncthing-era sync, clipboard bridge experiments, volume helpers)."
+    }
+  ],
+  "integration_points": [
+    {"from": "scripts (remote machines)", "to": "watcher", "type": "REST", "details": "POST /upload, X-Upload-Key auth, multipart ≤50MB"},
+    {"from": "ui", "to": "watcher", "type": "REST", "details": "GET /api/screenshots (limit/offset); same-origin in production"},
+    {"from": "watcher", "to": "host OS", "type": "clipboard", "details": "Wayland socket mount + wl-copy; FIFO/HTTP fallbacks"},
+    {"from": "watcher", "to": "scripts/paste-image.sh", "type": "shared-file", "details": "/tmp/ssbnk/last-screenshot via bind mount"},
+    {"from": "traefik", "to": "watcher", "type": "reverse-proxy", "details": "ss.delo.sh → :80, LE TLS, /health LB check"},
+    {"from": "ssbnk-cleanup", "to": "watcher data dirs", "type": "shared-volumes", "details": "retention archiving via cleanup.sh cron"},
+    {"from": "web (nginx)", "to": "watcher", "type": "reverse-proxy (legacy)", "details": "/latest + /upload → :31243, packaged image only"}
+  ]
+}

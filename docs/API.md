@@ -1,5 +1,7 @@
 # API Documentation
 
+> **⚠️ OUTDATED (2026-07):** This document describes a retired architecture. Assets are served root-level (`/{filename}`), not under `/hosted/`, and this doc is missing `/upload`, `/hybrid`, `/stateless`, `/health`, and `/api/screenshots`. Use [api-contracts-watcher.md](./api-contracts-watcher.md) for the current API.
+
 ssbnk provides a simple HTTP API for accessing hosted screenshots and metadata.
 
 ## Base URL

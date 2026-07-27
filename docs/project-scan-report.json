@@ -1,0 +1,34 @@
+{
+  "workflow_version": "1.2.0",
+  "timestamps": {"started": "2026-07-24T04:08:02Z", "last_updated": "2026-07-24T05:08:00Z", "completed": "2026-07-24T05:08:00Z"},
+  "mode": "initial_scan",
+  "scan_level": "deep",
+  "project_root": "/home/delorenj/code/ssbnk",
+  "project_knowledge": "/home/delorenj/code/ssbnk/docs",
+  "completed_steps": [
+    {"step": "step_1", "status": "completed", "timestamp": "2026-07-24T04:10:00Z", "summary": "Classified as multi-part with 4 parts: watcher (Go backend), ui (Astro/React web), web (nginx infra), scripts (bash cli). User confirmed."},
+    {"step": "step_2", "status": "completed", "timestamp": "2026-07-24T04:12:00Z", "summary": "Found 10 existing docs. User provided no additional focus areas."},
+    {"step": "step_3", "status": "completed", "timestamp": "2026-07-24T04:20:00Z", "summary": "Tech stack per part: Go 1.21 (watcher), Astro 6/React 19/Tailwind 4 (ui), Nginx (web), Bash (scripts)."},
+    {"step": "step_4", "status": "completed", "timestamp": "2026-07-24T04:35:00Z", "summary": "Deep scan via 3 explore agents; wrote api-contracts-watcher.md and data-models-watcher.md. Found broken Go tests, tracked binary, legacy scripts with hardcoded Syncthing key."},
+    {"step": "step_5", "status": "completed", "timestamp": "2026-07-24T04:40:00Z", "summary": "Wrote source-tree-analysis.md."},
+    {"step": "step_6", "status": "completed", "timestamp": "2026-07-24T04:45:00Z", "summary": "Wrote development-guide.md and deployment-guide.md."},
+    {"step": "step_7", "status": "completed", "timestamp": "2026-07-24T04:50:00Z", "summary": "Wrote integration-architecture.md (9 integration points) and project-parts.json."},
+    {"step": "step_8", "status": "completed", "timestamp": "2026-07-24T04:58:00Z", "summary": "Wrote architecture-watcher.md, architecture-ui.md, architecture-web.md, architecture-scripts.md."},
+    {"step": "step_9", "status": "completed", "timestamp": "2026-07-24T05:02:00Z", "summary": "Wrote project-overview.md and component-inventory-ui.md."},
+    {"step": "step_10", "status": "completed", "timestamp": "2026-07-24T05:05:00Z", "summary": "Master index.md generated; all 24 links verified to resolve."},
+    {"step": "step_11", "status": "completed", "timestamp": "2026-07-24T05:07:00Z", "summary": "Validation complete: no incomplete markers, JSON files valid, checklist satisfied. User chose finalize."},
+    {"step": "step_12", "status": "completed", "timestamp": "2026-07-24T05:08:00Z", "summary": "Workflow complete."}
+  ],
+  "current_step": "completed",
+  "project_types": [
+    {"part_id": "watcher", "project_type_id": "backend", "display_name": "Watcher/API (Go)"},
+    {"part_id": "ui", "project_type_id": "web", "display_name": "Management UI (Astro/React)"},
+    {"part_id": "web", "project_type_id": "infra", "display_name": "Nginx Static Hosting"},
+    {"part_id": "scripts", "project_type_id": "cli", "display_name": "Remote/Automation Scripts (Bash)"}
+  ],
+  "findings": {
+    "project_classification": "multi-part, 4 parts, Go + Astro/React + Nginx + Bash"
+  },
+  "outputs_generated": ["project-scan-report.json", "index.md", "api-contracts-watcher.md", "data-models-watcher.md", "source-tree-analysis.md", "development-guide.md", "deployment-guide.md", "integration-architecture.md", "project-parts.json", "architecture-watcher.md", "architecture-ui.md", "architecture-web.md", "architecture-scripts.md", "project-overview.md", "component-inventory-ui.md"],
+  "resume_instructions": "Workflow completed 2026-07-24T05:08:00Z. Re-run full-scan workflow for a rescan."
+}
