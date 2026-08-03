@@ -1,0 +1,83 @@
+installation:
+  version: 6.10.1-next.20
+  installDate: 2026-07-23T14:36:39.103Z
+  lastUpdated: 2026-07-23T14:36:39.103Z
+modules:
+  - name: core
+    version: 6.10.1-next.20
+    installDate: 2026-07-23T14:36:39.047Z
+    lastUpdated: 2026-07-23T14:36:39.101Z
+    source: built-in
+    npmPackage: null
+    repoUrl: null
+  - name: bmm
+    version: 6.10.1-next.20
+    installDate: 2026-07-23T14:36:39.060Z
+    lastUpdated: 2026-07-23T14:36:39.101Z
+    source: built-in
+    npmPackage: null
+    repoUrl: null
+  - name: bmb
+    version: main
+    installDate: 2026-07-23T14:36:39.074Z
+    lastUpdated: 2026-07-23T14:36:39.102Z
+    source: external
+    npmPackage: bmad-builder
+    repoUrl: https://github.com/bmad-code-org/bmad-builder
+    channel: next
+    sha: e6935f2776c34ffd9b18f4ef1e334584ef10a50f
+  - name: cis
+    version: main
+    installDate: 2026-07-23T14:36:39.080Z
+    lastUpdated: 2026-07-23T14:36:39.103Z
+    source: external
+    npmPackage: bmad-creative-intelligence-suite
+    repoUrl: https://github.com/bmad-code-org/bmad-module-creative-intelligence-suite
+    channel: next
+    sha: 07a8dd03d196a762f21c241d985293fe5b0f90e7
+ides:
+  - claude-code
+  - codex
+  - cursor
+  - github-copilot
+  - adal
+  - antigravity-cli
+  - auggie
+  - goose
+  - cline
+  - codebuddy
+  - codewhale
+  - command-code
+  - crush
+  - droid
+  - firebender
+  - gemini
+  - antigravity
+  - hermes
+  - bob
+  - iflow
+  - junie
+  - kilo
+  - kimi-code
+  - kiro
+  - kode
+  - mistral-vibe
+  - mux
+  - neovate
+  - ona
+  - openclaw
+  - opencode
+  - openhands
+  - pi
+  - pochi
+  - qoder
+  - qwen
+  - replit
+  - roo
+  - rovo-dev
+  - cortex
+  - amp
+  - trae
+  - warp
+  - windsurf
+  - zencoder

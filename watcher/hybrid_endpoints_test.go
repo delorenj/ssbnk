@@ -14,8 +14,9 @@ import (
 )
 
 // Test helper to create a temporary config for testing
-func createTestConfig(t *testing.T) (Config, string) {
-	tempDir := t.TempDir()
+func createTestConfig(tb testing.TB) (Config, string) {
+	tb.Helper()
+	tempDir := tb.TempDir()
 	
 	config := Config{
 		ScreenshotDir: filepath.Join(tempDir, "screenshots"),
@@ -34,7 +35,7 @@ func createTestConfig(t *testing.T) (Config, string) {
 	
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatalf("Failed to create test directory %s: %v", dir, err)
+			tb.Fatalf("Failed to create test directory %s: %v", dir, err)
 		}
 	}
 	
@@ -42,7 +43,8 @@ func createTestConfig(t *testing.T) (Config, string) {
 }
 
 // Helper to create test files and metadata
-func createTestData(t *testing.T, config Config) {
+func createTestData(tb testing.TB, config Config) {
+	tb.Helper()
 	hostedDir := filepath.Join(config.DataDir, "hosted")
 	metadataDir := filepath.Join(config.DataDir, "metadata")
 	
@@ -62,7 +64,7 @@ func createTestData(t *testing.T, config Config) {
 		hostedPath := filepath.Join(hostedDir, testFile.filename)
 		content := fmt.Sprintf("test image content %d", i)
 		if err := os.WriteFile(hostedPath, []byte(content), 0644); err != nil {
-			t.Fatalf("Failed to create test file %s: %v", testFile.filename, err)
+			tb.Fatalf("Failed to create test file %s: %v", testFile.filename, err)
 		}
 		
 		// Create corresponding metadata
@@ -79,7 +81,7 @@ func createTestData(t *testing.T, config Config) {
 		
 		metadataPath := filepath.Join(metadataDir, fmt.Sprintf("%s.json", metadata.ID))
 		if err := saveMetadata(metadata, metadataPath); err != nil {
-			t.Fatalf("Failed to save test metadata: %v", err)
+			tb.Fatalf("Failed to save test metadata: %v", err)
 		}
 	}
 }
@@ -232,8 +234,8 @@ func TestOffsetParsing(t *testing.T) {
 
 // Simple benchmark to ensure performance is reasonable
 func BenchmarkHybridEndpoint(b *testing.B) {
-	config, _ := createTestConfig(&testing.T{})
-	createTestData(&testing.T{}, config)
+	config, _ := createTestConfig(b)
+	createTestData(b, config)
 	
 	b.ResetTimer()
 	
@@ -245,7 +247,7 @@ func BenchmarkHybridEndpoint(b *testing.B) {
 }
 
 func BenchmarkStatelessEndpoint(b *testing.B) {
-	config, _ := createTestConfig(&testing.T{})
+	config, _ := createTestConfig(b)
 	
 	// Create files without metadata for stateless test
 	hostedDir := filepath.Join(config.DataDir, "hosted")

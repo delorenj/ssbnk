@@ -1,0 +1,21 @@
+{
+  "project_name": "Ssbnk",
+  "project_description": "",
+  "project_slug": "ssbnk",
+  "repo_path": "/home/delorenj/code/ssbnk",
+  "ticket_provider": {
+    "type": "plane",
+    "workspace": "33god",
+    "identifier": "SSBN",
+    "board_id": "",
+    "state": "planned"
+  },
+  "agents": {},
+  "automation": {
+    "reconcile": {
+      "enabled": false,
+      "grace_hours": 0,
+      "auto_review": true
+    }
+  }
+}
