@@ -6,10 +6,9 @@
   "ticket_provider": {
     "type": "plane",
     "workspace": "33god",
-    "identifier": "SSBN",
+    "identifier": "SSBNK",
     "board_id": "ce150fc4-bfd9-4b6f-9f14-6468c18616e3",
-    "state": "planned",
-    "board_url": "https://plane.delo.sh/33god/projects/ce150fc4-bfd9-4b6f-9f14-6468c18616e3/issues/"
+    "state": "linked"
   },
   "agents": {
     "ssbnk-pm": {
