@@ -1,88 +1,72 @@
-# Source Tree Analysis
+# Source tree analysis
 
-Multi-part repository. Four documented parts: `watcher/` (Go backend), `ui/` (Astro/React frontend), `web/` (Nginx configs — legacy architecture), `scripts/` (Bash automation). Excludes agent-tooling dotdirs, `_bmad*`, and `watcher-data/` (runtime output).
+The source repository has two application areas and a small set of host-client
+utilities. It deliberately excludes production Compose and systemd ownership,
+which live in `/home/delorenj/docker/stacks/utils/ssbnk`.
 
-```
+```text
 ssbnk/
-├── compose.yml                     # Dev/maintainer stack: watcher + cleanup, Traefik labels
-├── docker-compose.packaged.yml     # All-in-one consumer stack (supervisord: nginx+watcher+cron)
-├── Dockerfile                      # All-in-one image (nginx:alpine + supervisord) — NOT used by compose.yml
-├── mise.toml                       # Tasks: build/tag/push/deploy/test/dev/version*
-├── .mise/scripts/versioning.sh     # Semver workflow backing mise version tasks
+├── Dockerfile                     # Canonical Go plus Astro image
+├── compose.dev.yml                # Isolated development and profile services
+├── mise.toml                      # Test, build, dev, and version tasks
+├── .dockerignore                  # Excludes tooling and generated data
 ├── .github/workflows/
-│   ├── docker-build.yml            # CI: multi-arch builds of both images → Docker Hub + GHCR
-│   ├── opencode.yml                # /oc comment-triggered AI agent
-│   └── opencode-review.yml         # Automatic AI PR review
+│   └── docker-build.yml           # Test and multi-architecture image publish
 │
-├── watcher/                        # PART: watcher (Go backend) — the core service
-│   ├── main.go                     # ENTRY POINT (1392 LOC): fsnotify loop + HTTP API + clipboard
-│   ├── main_test.go                # Broken: references removed Config fields (doesn't compile)
-│   ├── test_hybrid_endpoints.go    # Misnamed — real tests that never run, compiled into binary
-│   ├── main.go.backup              # Stale tracked backup — dead weight
-│   ├── ssbnk-watcher               # Compiled 9.8MB binary accidentally tracked in git
-│   ├── go.mod / go.sum             # fsnotify v1.7.0, google/uuid v1.6.0
-│   └── Dockerfile                  # 3-stage: Go build → Astro UI build → alpine runtime (used by compose.yml)
+├── watcher/                       # Go package for every runtime command
+│   ├── cli.go                     # serve, cleanup, clipboard-bridge dispatch
+│   ├── main.go                    # Ingestion, conversion, HTTP API, static UI
+│   ├── state.go                   # Atomic markers and Wayland bridge
+│   ├── cleanup.go                 # Native retention engine
+│   ├── *_test.go                  # CLI, API, state, and cleanup tests
+│   └── go.mod / go.sum
 │
-├── ui/                             # PART: ui (Astro 6 + React 19) — has its own .git (separate repo)
-│   ├── astro.config.mjs            # react() integration + @tailwindcss/vite; static output
-│   ├── package.json                # Scripts: dev/build/preview (astro). NO test script
-│   ├── components.json             # shadcn config (style base-nova, @base-ui/react primitives)
-│   ├── tsconfig.json               # strict; alias @/* → ./src/*
+├── ui/                            # Astro and React static frontend
+│   ├── astro.config.mjs           # React, Tailwind, and local API proxy
+│   ├── package.json / package-lock.json
 │   └── src/
-│       ├── pages/index.astro       # ENTRY: sole page, mounts gallery island
-│       ├── layouts/Layout.astro    # HTML shell, dark mode forced
-│       ├── components/
-│       │   ├── ScreenshotGallery.tsx  # The entire app: grid/list gallery + pagination
-│       │   ├── Welcome.astro       # Unused starter leftover
-│       │   └── ui/                 # shadcn primitives (button, card, toggle, toggle-group)
-│       ├── lib/utils.ts            # cn()
-│       └── styles/global.css       # Tailwind 4 CSS-first config, shadcn neutral theme
+│       ├── pages/index.astro
+│       ├── layouts/Layout.astro
+│       ├── components/ScreenshotGallery.tsx
+│       ├── components/ui/
+│       └── styles/global.css
 │
-├── web/                            # PART: web (Nginx — legacy 3-container architecture)
-│   ├── nginx.conf                  # http-level: security headers, CORS, rate-limit zone
-│   ├── default.conf                # server ss.delo.sh:80; proxies /latest + /upload → watcher:31243
-│   └── html/                       # ~136 hosted asset files (runtime data, served root-level by watcher)
+├── scripts/                       # Host and remote-client helpers
+│   ├── paste-image.sh
+│   ├── remote-screenshot-upload.sh
+│   ├── install-remote-client.sh
+│   └── generate-missing-metadata.{go,sh}
 │
-├── scripts/                        # PART: scripts (Bash automation)
-│   ├── paste-image.sh              # CURRENT: Ctrl+Shift+V handler (wl-copy + ydotool)
-│   ├── remote-screenshot-upload.sh # CURRENT: reference uploader for remote machines (inotifywait → POST /upload)
-│   ├── cleanup.sh                  # CURRENT: retention cron (runs in ssbnk-cleanup container)
-│   ├── detect-display-server.sh    # CURRENT: Wayland/X11 diagnostic
-│   ├── build-and-push.sh           # Maintainer release script for all-in-one image
-│   ├── generate-missing-metadata.{sh,go}  # One-off metadata backfill (hardcoded ss.delo.sh)
-│   ├── run-ssbnk.sh                # Curl-pipe-bash installer for packaged image
-│   └── [legacy] fast-screenshot-sync.sh, force-screenshot-sync.sh, sync-now.sh,
-│       local-screenshot-watcher.sh, instant-screenshot.sh,   # Syncthing/"Bloodbank"-era
-│       clipboard-bridge.sh, clipboard-http.sh, setup-browser-bridge.sh,  # superseded experiments
-│       mount-volume.sh, umount-volume.sh, get-hosted-url.sh  # dead volume-mount helpers
-│
-├── assets/logo/                    # Branding + privacy.html / terms.html
-├── docs/                           # This documentation set (+ API.md, investigation report)
-├── watcher-data/                   # Runtime metadata output (local dev)
-├── README.md / CONTRIBUTING.md / DEPLOYMENT.md / CHANGELOG.md
-└── AGENTS.md / CLAUDE.md / GEMINI.md   # Agent instructions (CLAUDE/GEMINI symlinked to AGENTS)
+├── docs/                          # Architecture, contracts, and guides
+└── assets/                        # Project branding and legal pages
 ```
 
-## Critical folders
+Agent framework and project-management directories are repository tooling, not
+application runtime. `.dev-data/`, UI build output, logs, state databases, and
+local environment material are ignored and excluded from the image context.
 
-| Folder | Why it matters |
-|---|---|
-| `watcher/` | The entire runtime: one Go binary does watching, conversion, hosting, API, UI serving, clipboard |
-| `ui/src/components/` | The whole frontend is `ScreenshotGallery.tsx`; `ui/` subdir has unused scaffold |
-| `web/html/` | Live hosted assets — runtime data, not source |
-| `scripts/` | Half current automation, half legacy — see table in `architecture-scripts.md` |
+## Runtime entry points
 
-## Entry points
+The primary entry points are:
 
-- **Container:** `watcher/Dockerfile` CMD `./watcher` → `main()` in `watcher/main.go` (fsnotify loop + `startAPIServer` on `:80`)
-- **UI dev:** `cd ui && npm run dev` (Astro, localhost:4321)
-- **Host keyboard shortcut:** `scripts/paste-image.sh` via `~/.local/bin/ssbnk-paste-image` symlink
-- **Remote machines:** `scripts/remote-screenshot-upload.sh` under systemd user service / launchd agent
+- `/usr/local/bin/ssbnk serve` for the public application;
+- `/usr/local/bin/ssbnk cleanup [--dry-run]` for maintenance;
+- `/usr/local/bin/ssbnk clipboard-bridge` for host clipboard delivery;
+- `ui/src/pages/index.astro` for the static browser application;
+- `scripts/paste-image.sh` for the desktop paste shortcut; and
+- `scripts/remote-screenshot-upload.sh` for remote clients.
 
-## Integration points
+The root image uses `ssbnk` as its entry point and `serve` as its default
+command. Compose selects the other roles without building another image.
 
-- Watcher → host clipboard: Wayland socket bind-mounted into container (`wl-copy`), FIFO/HTTP fallbacks
-- Watcher → host file: `/tmp/ssbnk/last-screenshot` (shared bind mount) → `paste-image.sh`
-- Remote machines → watcher: `POST /upload` with `X-Upload-Key`
-- UI → watcher: `GET /api/screenshots` (same origin in production — watcher serves the Astro build)
-- Traefik → watcher: external `proxy` network, `Host(ss.delo.sh)`, LE TLS; file-based dynamic config with `/health` check
+## Repository boundary
+
+The source tree doesn't contain a production `compose.yml`. This absence is an
+architectural guardrail: local development uses `compose.dev.yml`, while the
+central deployment hub stores the exact production image digest and host
+integration.
+
+The deleted `web/`, packaged Compose, watcher-specific Dockerfile, supervisor
+configuration, and shell cleanup entry point belong to the retired
+architecture. [Retired Nginx architecture](./architecture-web.md) preserves a
+short historical explanation without presenting those files as deployable.

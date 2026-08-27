@@ -1,49 +1,67 @@
-# Architecture — UI (Astro/React management interface)
+# UI architecture
 
-## Executive summary
-
-The management UI is a single-screen Astro 6 app with one React 19 island: a paginated screenshot gallery backed by the watcher's `/api/screenshots` endpoint. It builds to static files that the watcher serves itself (`SSBNK_UI_DIR`, default `/ui`) — there is no separate UI server. Early-stage but functional. **Note:** `ui/` contains its own `.git` directory (separate repository nested in this one).
+The management UI is an Astro 7 static application with one React 19 island.
+The canonical Docker build embeds its output at `/ui`, and `ssbnk serve`
+delivers the UI and API from the same HTTP origin. There is no standalone
+frontend service in production.
 
 ## Technology stack
 
-| Category | Technology | Version | Justification |
-|---|---|---|---|
-| Framework | Astro | ^6.0.5 | Static output, islands architecture |
-| UI library | React | ^19.2.4 | Via `@astrojs/react` ^5.0.0 |
-| Language | TypeScript | strict | `astro/tsconfigs/strict`, alias `@/* → ./src/*` |
-| Styling | Tailwind CSS | ^4.2.1 | Vite plugin, CSS-first config |
-| Components | shadcn (base-nova) | ^4.0.8 | On `@base-ui/react` ^1.3.0 primitives (not Radix) |
-| Font | Geist Variable | @fontsource-variable | — |
-| Node | >= 22.12.0 | engines | ESM (`"type": "module"`) |
+The UI build uses these technologies:
 
-## Architecture pattern
+| Category | Technology | Version or mode |
+| --- | --- | --- |
+| Framework | Astro | 7 |
+| Interactive UI | React | 19 |
+| Language | TypeScript | Strict configuration |
+| Styling | Tailwind CSS | 4 |
+| Components | shadcn with `@base-ui/react` | `base-nova` style |
+| Build output | Static files | `ui/dist/` |
 
-Static prerendering (no SSR adapter, no output mode set). One page (`src/pages/index.astro`) mounts one island (`<ScreenshotGallery client:load />`) inside `Layout.astro` (dark mode forced). `astro.config.mjs` is minimal: `react()` integration + `@tailwindcss/vite`. No dev-server proxy customization (dev on localhost:4321).
+## Application structure
 
-## Data flow
+`ui/src/pages/index.astro` mounts
+`ui/src/components/ScreenshotGallery.tsx` with `client:load`. The gallery is
+the functional application surface: it fetches metadata, renders grid and list
+views, formats sizes and dates, and provides offset pagination.
 
-`ScreenshotGallery.tsx` fetches `GET ${API_BASE}/api/screenshots?limit=48&offset=N` where `API_BASE = PUBLIC_API_URL` (build-time env, default `https://ss.delo.sh`; no `.env` file exists in `ui/`). Response: `{screenshots[], total, offset, limit}`. In production this is same-origin because the watcher serves the built UI. Fetch failures only `console.error` — no error UI.
+`ui/src/layouts/Layout.astro` provides the HTML shell. The shadcn toggle
+components implement the view selector, and `ui/src/styles/global.css`
+contains the Tailwind and theme tokens.
 
-## Component overview
+## API integration
 
-| Component | Status | Purpose |
-|---|---|---|
-| `pages/index.astro` | used | Sole page; mounts the gallery |
-| `layouts/Layout.astro` | used | HTML shell, `class="dark"`, title "ssbnk" |
-| `components/ScreenshotGallery.tsx` | used | The entire app: grid/list toggle, lazy thumbnails, offset pagination, size/date formatting |
-| `components/ui/toggle-group.tsx`, `toggle.tsx` | used | View-mode switcher (`@base-ui/react` + context) |
-| `components/ui/button.tsx`, `card.tsx` | **unused** | shadcn scaffold; gallery uses raw `<button>` |
-| `components/Welcome.astro`, `assets/*` | **unused** | Astro starter leftovers |
-| `lib/utils.ts` | used | `cn()` |
+The gallery requests:
 
-## Styling
+```text
+/api/screenshots?limit=48&offset=<offset>
+```
 
-Tailwind 4 CSS-first in `src/styles/global.css`: `@import "tailwindcss"`, `tw-animate-css`, `shadcn/tailwind.css`, Geist font; shadcn neutral theme as oklch CSS variables for `:root`/`.dark`, `@theme inline` mapping, `@custom-variant dark`.
+`PUBLIC_API_URL` is optional. Its default is an empty string, which makes
+requests same-origin in local and production containers. Set it only when you
+intentionally run the Astro development server against a different API host.
+The build removes a trailing slash before composing request URLs.
 
-## Build & deployment
+## Build and delivery
 
-`npm run build` → `dist/`. The watcher Dockerfile's `ui-builder` stage runs `npm ci && npm run build` and copies `dist` into the runtime image at `/ui`; the watcher serves `/_astro/*`, `/favicon.svg`, and `index.html` fallback. Dev: `npm run dev`. **No test script exists.**
+The UI builder stage runs `npm ci` and `npm run build`. The final image copies
+`ui/dist/` to `/ui`. The Go server handles `/_astro/*`, `/favicon.svg`, and the
+static `index.html` fallback.
 
-## Maturity & debt
+CI builds the UI before publishing the image and rejects a build that contains
+the production-only `ss.delo.sh` API hostname. This check prevents a local or
+future deployment from silently calling the current production API.
 
-Functional single screen with a real backend contract; everything else is starter scaffolding (stock README, unused components). No tests, no env file, no error states, no theme switcher. Older docs (AGENTS.md) describe a retired "React + Express + Vite" stack — the Astro rewrite replaced it.
+## Development
+
+Run the UI-only development server when you need Astro hot reload:
+
+```bash
+cd ui
+npm ci
+npm run dev
+```
+
+For integration work, use `mise run dev`. It builds the canonical image and
+serves the embedded UI at `http://localhost:13143` by default. The UI package
+has build and Astro validation scripts but no browser test suite.

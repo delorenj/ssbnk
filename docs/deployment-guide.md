@@ -1,60 +1,130 @@
-# Deployment Guide
+# Deployment guide
 
-Two distribution paths exist. The maintainer's own deployment uses path A.
+Production deployment is intentionally separate from application development.
+The source repository publishes one tested image. The DeLoContainers hub pins
+that image by digest and defines how it runs on this host.
 
-## A. Dev/maintainer stack — `compose.yml` (current production)
+## Ownership boundary
 
-Two services, built from source:
+Use these repositories for distinct changes:
 
-**`ssbnk-watcher`** (built from `watcher/Dockerfile`, 3-stage: Go build → Astro UI build → Alpine runtime with ffmpeg/xclip/wl-clipboard/xdg-utils, non-root user `ssbnk`, EXPOSE 80):
+| Repository | Owns |
+| --- | --- |
+| `/home/delorenj/code/ssbnk` | Go and UI source, tests, `Dockerfile`, `compose.dev.yml`, mise tasks, and image CI |
+| `/home/delorenj/docker/stacks/utils/ssbnk` | Production digest, Compose services, mounts, secret references, Traefik routing, and systemd units |
 
-- Volumes:
-  - `${SSBNK_SCREENSHOT_DIR}:/media/screenshots`, `${SSBNK_SCREENCAST_DIR}:/media/screencasts`
-  - `/home/delorenj/data/ssbnk/hosted:/data/hosted`, `/home/delorenj/data/ssbnk/metadata:/data/metadata` (hardcoded host paths)
-  - `/tmp/ssbnk:/tmp/ssbnk` (shared with host `paste-image.sh`)
-  - `${XDG_RUNTIME_DIR:-/run/user/1000}:/run/user/1000:rw` (Wayland socket for clipboard), `/tmp/.X11-unix` (X11 fallback)
-- Env: `SSBNK_URL=https://${SSBNK_DOMAIN}`, container-side dirs, `SSBNK_API_PORT=80`, `SSBNK_UPLOAD_KEY`, display vars
-- Network: external `proxy`; Traefik labels `Host(`${SSBNK_DOMAIN}`)`, `websecure`, `tls.certresolver=letsencrypt`, LB port 80
+Don't copy application source or a cleanup script into the deployment hub.
+Don't put production host paths, live image promotion, or service scheduling in
+the source repository.
 
-**`ssbnk-cleanup`** (`alpine:latest`): crond running `scripts/cleanup.sh` daily at 02:00 against `/data/hosted`, `/data/metadata`, `/data/archive`; `SSBNK_RETENTION_DAYS` (default 30).
+## Canonical image
 
-The single watcher binary serves **everything**: hosted assets (root-level), the Astro UI, and all API endpoints. **There is no Nginx container in this stack** — `web/` configs are from the retired 3-container architecture.
+The root source `Dockerfile` publishes one image at
+`docker.io/delorenj/ssbnk`. It contains:
 
-Production instance: `/home/delorenj/docker/stacks/utils/ssbnk/compose.yml` (same shape, pulls `delorenj/ssbnk-watcher:latest`); `mise run deploy` updates it.
+- `/usr/local/bin/ssbnk`, with `serve`, `cleanup`, and `clipboard-bridge`;
+- the Astro static build at `/ui`;
+- `ffmpeg` for screencast conversion; and
+- `wl-copy` for the isolated clipboard role.
 
-### Domain / TLS
+CI publishes `sha-<commit>`, semantic-version, and default-branch tags to
+Docker Hub and GitHub Container Registry. Production Compose uses a tag plus
+its `sha256` digest so a registry tag change cannot alter a running deployment.
 
-- Production domain: `ss.delo.sh`, TLS via Traefik `letsencrypt` on `websecure`
-- `*.delo.sh` reaches Traefik through a Cloudflare Tunnel
-- After a Nov 2025 incident (Traefik Docker provider broken: "client version 1.24 too old"), routing uses a **file-based Traefik dynamic config** (`~/docker/trunk-main/core/traefik/traefik-data/dynamic/ssbnk.yml`) with security headers and a `/health` LB health check. See `docs/latest-endpoint-investigation-report.md`.
+## Production services
 
-## B. Packaged all-in-one — `docker-compose.packaged.yml` + root `Dockerfile`
+The production Compose file reuses the pinned image in three roles:
 
-Consumer distribution: single container (`delorenj/ssbnk:latest`, also pushed as `ssbnk/ssbnk` via `build-and-push.sh`) running **supervisord** with three programs: Nginx, `ssbnk-watcher`, cleanup cron. Nginx serves `web/` configs; the watcher listens internally on 31243.
+| Service | Command | Network | Sensitive mounts |
+| --- | --- | --- | --- |
+| `ssbnk` | `serve` | External `proxy` | Media input and `/data`; no display socket |
+| `clipboard` | `clipboard-bridge` | `none` | Read-only `/data/state` and the exact Wayland socket |
+| `cleanup` | `cleanup` | `none` | Read-write `/data`; maintenance profile only |
 
-- `VOLUME ["/media", "/data"]`; named volume `ssbnk_data:/data`
-- Install path: `scripts/run-ssbnk.sh` (curl-pipe-bash)
-- **Known defect:** the packaged compose sets both `network_mode: host` and `networks: [proxy]` + Traefik labels — host networking wins, so the Traefik routing as labeled cannot work.
-- The root Dockerfile builds only `watcher/main.go` (no UI) — behind the watcher Dockerfile feature-wise.
+All roles run as UID and GID 1000 with a read-only root filesystem, dropped
+capabilities, and `no-new-privileges`. The public service receives a small
+writable `/tmp` mount for media conversion. Only that service joins the
+Traefik network, and it exposes no host port.
 
-## Remote upload machines
+The screenshot and screencast source mounts are intentionally read-write.
+Successful ingestion removes the original after storing the hosted copy, so a
+read-only source mount would silently change the service into an accumulating
+copy-only workflow.
 
-Each client machine runs the uploader (`scripts/remote-screenshot-upload.sh` → `~/.local/bin/ssbnk-remote-upload`), installed by `scripts/install-remote-client.sh`:
+The cleanup role receives the production `SSBNK_URL` and explicit
+`SSBNK_STATE_DIR=/data/state`. These values let it repair a latest marker even
+when the chosen remaining asset doesn't have metadata.
 
-- Config: `~/.config/ssbnk/remote.env` (`SSBNK_HOST`, `SSBNK_UPLOAD_KEY`, `SSBNK_SCREENSHOT_DIR` — colon-separated)
-- **Linux (e.g. tiny-chungus, Arch):** systemd user service `~/.config/systemd/user/ssbnk-remote-upload.service`; requires `inotify-tools`
-- **macOS (e.g. carries-macbook-air):** launchd agent `~/Library/LaunchAgents/sh.delo.ss.remote-upload.plist`; requires `fswatch` (Homebrew). If the watch dir is Desktop/Documents/Downloads, macOS TCC requires a one-time privacy grant — the installer walks the user through System Settings and polls until granted.
+The clipboard service mounts one path:
 
-The uploader watches for new screenshots (inotifywait on Linux, fswatch on macOS), waits for file-size stability, dedupes concurrent events, and `POST`s to `$SSBNK_HOST/upload` with `X-Upload-Key` (up to `SSBNK_UPLOAD_RETRIES`, default 3). On success the hosted URL is copied to the remote clipboard and the local path written to `/tmp/ssbnk/last-screenshot`; the local file is kept.
+```text
+${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}
+```
 
-## CI/CD
+It doesn't mount the full runtime directory or `/tmp/.X11-unix`, and it has no
+network. The public service can't access the desktop session.
 
-`.github/workflows/docker-build.yml` (push to main, `v*` tags, PRs):
+## Secrets and routing
 
-- `build-watcher`: `watcher/Dockerfile` → `$DOCKERHUB_USERNAME/ssbnk-watcher` + GHCR, multi-arch amd64/arm64
-- `build-packaged`: root `Dockerfile` → image `ssbn`/`ssbnk`, same registries, plus Docker Hub README sync
-- Secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`
+The deployment hub keeps `SSBNK_UPLOAD_KEY` as an `op://` reference in
+`.env.op`. The system service launches the public Compose operation through
+`op run`, so the credential exists only in that runtime environment. The
+cleanup and clipboard units don't receive the upload key.
 
-Also: `opencode.yml` / `opencode-review.yml` (AI agent + PR review via Kimi).
+Traefik routes `https://ss.delo.sh` to port 80 of the public service on the
+external `proxy` network. The application serves the UI, API, and hosted assets
+directly. There is no Nginx or frontend proxy inside the stack.
 
-Release flow: `mise run version:bump-*` → CHANGELOG → tag → CI builds/pushes → `mise run deploy`.
+## systemd operation
+
+Versioned units under `/home/delorenj/docker/systemd` and
+`/home/delorenj/docker/systemd/user` control three lifecycles:
+
+- `docker-stack-ssbnk.service` validates the production environment, pulls the
+  pinned image, and starts the public service.
+- The cleanup timer invokes a one-shot service that runs the maintenance
+  profile with `ssbnk cleanup`.
+- The `ssbnk-clipboard.service` user unit follows the graphical session and
+  starts only the network-disabled desktop profile.
+
+The timer runs daily at 02:00 local time and uses `Persistent=true`, so a missed
+run occurs after the host returns. Scheduling stays outside the image; the
+cleanup container exits after one execution.
+
+## Promotion procedure
+
+Promote a release only after the source checks and image build succeed:
+
+1. Land the source commit on `main` and wait for the canonical image workflow.
+2. Record the published `sha-<commit>` tag and `sha256` digest.
+3. Replace the image reference in the deployment hub's `compose.yml` with that
+   exact tag and digest.
+4. Validate the rendered configuration without printing secret values.
+5. Commit and push the deployment change.
+6. Restart the stack systemd service, then restart the graphical-session
+   clipboard user service so both roles use the promoted image.
+7. Inspect Compose health and logs.
+8. Verify the public UI, `/health`, an uploaded test image, state publication,
+   and clipboard delivery.
+9. Run cleanup in `--dry-run` mode before relying on the scheduled mutation.
+
+The deployment commit and prior digest provide rollback. Revert the deployment
+commit, restart the stack service, and verify health to restore the previous
+image.
+
+## Remote upload clients
+
+Remote machines run `scripts/remote-screenshot-upload.sh`, installed by
+`scripts/install-remote-client.sh`. Each client stores its local endpoint and
+secret configuration outside the repository, watches configured screenshot
+directories, and posts to `https://ss.delo.sh/upload`.
+
+The remote uploader keeps the source file and copies the returned URL to the
+remote machine's clipboard. It doesn't need access to production Compose or
+the server host's Wayland session.
+
+## Historical routing evidence
+
+The [latest endpoint investigation](./latest-endpoint-investigation-report.md)
+documents a November 2025 incident and an older layout. Keep it as evidence,
+but don't use its Nginx or multi-container details as the current runbook.

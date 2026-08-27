@@ -1,41 +1,72 @@
-# Project Overview — ssbnk (ScreenShot Bank)
+# ssbnk project overview
 
-## Purpose
+ssbnk is a self-hosted screenshot and screencast service. It ingests local
+files or authenticated uploads, normalizes their names, writes metadata,
+serves the files and gallery, and publishes the latest hosted URL for an
+isolated desktop clipboard bridge.
 
-ssbnk is a self-hosted screenshot/screencast hosting service. It watches local folders, normalizes filenames, hosts assets, and exposes "latest" retrieval endpoints. Remote machines upload screenshots via an `/upload` API; the hosted URL is copied to the host clipboard automatically. Production instance: `https://ss.delo.sh`.
+## Runtime model
 
-## Executive summary
+One Go binary provides three commands:
 
-A single Go binary is the core: it watches screenshot/screencast directories (fsnotify), converts videos to GIF (ffmpeg), stores assets plus JSON metadata sidecars, serves the assets/API/Astro UI over HTTP, and integrates with the host clipboard (Wayland/X11). Remote Tailnet machines run a Bash uploader that POSTs new screenshots. A cron container enforces retention. The whole stack is two containers behind Traefik with Let's Encrypt TLS, fronted by a Cloudflare Tunnel.
+- `ssbnk serve` watches media directories, handles uploads, serves the HTTP
+  API, serves hosted assets, and serves the embedded Astro UI. Running `ssbnk`
+  without a command is equivalent to `ssbnk serve`.
+- `ssbnk cleanup [--dry-run]` applies hosted-file and archive retention,
+  removes orphaned metadata, and repairs the latest state markers.
+- `ssbnk clipboard-bridge` watches `/data/state/latest-url` and copies each new
+  URL to the Wayland clipboard.
 
-## Tech stack summary
+The canonical `Dockerfile` builds the Go binary and Astro static assets into
+one image. Production runs that same immutable image with different commands
+and permissions for the public service, cleanup job, and clipboard bridge.
 
-| Part | Stack | Type |
-|---|---|---|
-| `watcher/` | Go 1.21, fsnotify, uuid, ffmpeg, net/http | backend |
-| `ui/` | Astro 6, React 19, TypeScript, Tailwind 4, shadcn (@base-ui/react) | web |
-| `web/` | Nginx (legacy 3-container architecture) | infra |
-| `scripts/` | Bash/POSIX sh, inotifywait, wl-clipboard, ydotool | cli |
+## Architecture boundaries
 
-## Architecture type
+The two repositories have different responsibilities:
 
-Multi-part repository, event-driven single-process core. No database — the filesystem (`hosted/` + `metadata/` JSON sidecars) is the state. The watcher serves everything on port 80; Traefik handles routing/TLS.
+- `/home/delorenj/code/ssbnk` owns application behavior, tests, the canonical
+  `Dockerfile`, `compose.dev.yml`, task definitions, and image publishing.
+- `/home/delorenj/docker/stacks/utils/ssbnk` owns the production image digest,
+  Compose services, host paths, secret references, Traefik labels, and systemd
+  units.
 
-## Repository structure
+This split keeps development next to the source while preserving a single
+versioned operations hub for every deployed stack. Production never builds
+from a relative application checkout.
 
-4 parts, documented separately — see [source-tree-analysis.md](./source-tree-analysis.md) and [project-parts.json](./project-parts.json). Integration between parts: [integration-architecture.md](./integration-architecture.md).
+## Technology summary
 
-## Detailed documentation
+The build combines a small set of established tools:
 
-- Architecture: [watcher](./architecture-watcher.md) · [ui](./architecture-ui.md) · [web](./architecture-web.md) · [scripts](./architecture-scripts.md)
-- API: [api-contracts-watcher.md](./api-contracts-watcher.md)
-- Data: [data-models-watcher.md](./data-models-watcher.md)
-- UI components: [component-inventory-ui.md](./component-inventory-ui.md)
-- Guides: [development](./development-guide.md) · [deployment](./deployment-guide.md)
+| Area | Technology | Role |
+| --- | --- | --- |
+| Runtime | Go 1.26 module, `fsnotify`, `net/http` | Ingestion, API, cleanup, and state bridge |
+| Media | `ffmpeg` | Screencast-to-GIF conversion |
+| UI | Astro 7, React 19, TypeScript, Tailwind CSS 4 | Static screenshot gallery |
+| Image | Multi-stage Docker build on Alpine 3.22 | One deployable artifact |
+| Development | Docker Compose and mise | Isolated local stack and checks |
+| Production | Docker Compose, systemd, Traefik, 1Password | Digest-pinned operation |
 
-## Current state highlights (as of 2026-07)
+## Data and security model
 
-- Go tests are broken (`main_test.go` stale; misnamed test file ships in binary)
-- A 9.8 MB compiled binary and a `main.go.backup` are tracked in git
-- AGENTS.md and docs/API.md describe a retired architecture (Nginx container, React+Express UI, `/hosted/` prefix)
-- Legacy scripts carry a hardcoded Syncthing API key
+ssbnk doesn't use a database. The `/data` tree contains hosted assets,
+metadata sidecars, dated archives, and two small state markers. The public
+service mounts media and application data, but it receives no display socket.
+Only the network-disabled clipboard bridge receives the exact Wayland socket
+and read-only state directory. The cleanup job also has no network.
+
+`POST /upload` requires `SSBNK_UPLOAD_KEY`. Production injects the value at
+runtime through the deployment hub's 1Password environment template; the
+source repository contains no credential value.
+
+## Related documentation
+
+Use the following documents for implementation detail:
+
+- [Integration architecture](./integration-architecture.md)
+- [Go service architecture](./architecture-watcher.md)
+- [UI architecture](./architecture-ui.md)
+- [Data models](./data-models-watcher.md)
+- [Development guide](./development-guide.md)
+- [Deployment guide](./deployment-guide.md)

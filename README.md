@@ -1,108 +1,92 @@
 # ssbnk (ScreenShot Bank)
 
-**Screenshot sharing that hits different**
+Fast, self-hosted screenshot ingestion and sharing. A single Go binary watches
+local screenshot folders, accepts authenticated remote uploads, serves the API
+and bundled Astro gallery, converts screencasts to GIFs, and manages retention.
 
-A dead simple, lightning-fast screenshot hosting service designed for developers, content creators, and anyone who needs instant screenshot sharing. Take a screenshot on any machine, get a hosted URL on your clipboard instantly.
+## One image, three commands
 
-## Features
+The canonical `delorenj/ssbnk` image contains the Go service, compiled frontend,
+native cleanup implementation, ffmpeg, and the Wayland clipboard helper.
 
-- **Instant hosting**: Screenshots are immediately available via HTTPS
-- **Auto-clipboard**: URLs automatically copied to clipboard on the host machine
-- **Remote upload**: Screenshots from any Tailnet machine are auto-uploaded and clipboard-ready
-- **Paste image**: Ctrl+Shift+V pastes the actual image (not just the URL) into the active window
-- **Smart cleanup**: Configurable retention with intelligent daily cleanup
-- **Display server agnostic**: Supports both X11 and Wayland seamlessly
-- **Secure by default**: Hosted behind Traefik reverse proxy with automatic TLS
-- **Lightning fast**: Go-powered file watcher with minimal overhead
+| Command | Responsibility |
+| --- | --- |
+| `ssbnk serve` | Watch files, ingest uploads, serve assets/API/UI, and publish desktop state |
+| `ssbnk cleanup` | Archive and expire data in one bounded run (`--dry-run` supported) |
+| `ssbnk clipboard-bridge` | Watch desktop state and copy the latest hosted URL with `wl-copy` |
 
-## Quick Start
-
-```bash
-# Clone and configure
-git clone https://github.com/delorenj/ssbnk.git
-cd ssbnk
-cp .env.example .env  # Edit with your domain and directories
-
-# Start the stack
-docker compose up -d
-```
+No argument defaults to `serve`.
 
 ## Architecture
 
-```
-Remote Machines                    ssbnk Host (big-chungus)
-+-----------------+               +---------------------------+
-| screenshot taken|               |  ssbnk-watcher (Go)       |
-| fswatch/inotify |--POST /upload-->  - processes image       |
-| detects file    |               |  - saves to web/html/     |
-+-----------------+               |  - creates metadata JSON  |
-                                  |  - copies URL to clipboard|
-Local Screenshots                 +---------------------------+
-+-----------------+               |  ssbnk-web (nginx)        |
-| screenshot dir  |               |  - serves hosted assets   |
-| fsnotify watch  |--move-------->|  - proxies API endpoints  |
-+-----------------+               +---------------------------+
-                                  |  ssbnk-cleanup (cron)     |
-                                  |  - daily retention sweep  |
-                                  +---------------------------+
+```text
+local screenshot dirs ─┐
+remote POST /upload ───┼─> ssbnk serve ─> /data ─> API + bundled Astro UI
+browser / Traefik ─────┘         │
+                                 └─> /data/state/latest-url
+                                                │
+                              isolated clipboard-bridge
+                              (exact Wayland socket only)
+
+systemd timer ─> compose run --rm cleanup ─> /data
 ```
 
-## Workflow
+The public service never receives the host's Wayland runtime directory or X11
+socket. The optional bridge runs as the desktop user, has no network, and gets
+only the exact Wayland socket plus read-only state.
 
-### Local screenshots
-1. Screenshot saved to your configured watch directory
-2. Watcher detects new file instantly
-3. File moved to hosted directory with timestamp-based naming
-4. URL copied to clipboard automatically
+## Development
 
-### Remote screenshots
-1. Screenshot taken on a remote machine (macOS or Linux)
-2. `ssbnk-remote-upload` service detects the new file
-3. File POSTed to `https://your-domain/upload` with API key auth
-4. Watcher saves file, creates metadata, copies URL to host clipboard
-5. SSH into host, Ctrl+V pastes the URL
-
-### Paste image (Ctrl+Shift+V)
-- Bound as a GNOME custom shortcut
-- Temporarily swaps clipboard to image data, simulates Ctrl+V, restores original clipboard
-- Uses `ydotool` for input simulation on GNOME/Wayland
-
-## Remote Machine Setup
-
-The remote uploader runs as a user service on any machine that can reach your ssbnk host. The installer handles everything: dependencies, config, service registration, macOS privacy permissions, and an end-to-end test.
+Requirements: Docker Compose v2 and mise. The repository pins Go 1.26.7 and
+Node 22 for reproducible local checks.
 
 ```bash
-# On the remote machine (Linux or macOS), from a cloned repo:
-scripts/install-remote-client.sh
+mise run test          # Go race/vet/vulnerability checks + production UI build
+mise run build         # canonical local image: ssbnk:dev
+mise run dev           # isolated stack on http://127.0.0.1:13143
+mise run dev:cleanup   # native cleanup dry-run against .dev-data only
+mise run dev:down
 ```
 
-You'll be asked for `SSBNK_HOST`, `SSBNK_UPLOAD_KEY`, and the screenshot directory (defaults: `~/Screenshots` on Linux, `~/Desktop` on macOS) — saved to `~/.config/ssbnk/remote.env`.
+Development data lives under ignored `.dev-data/`. The source repository's
+[`compose.dev.yml`](compose.dev.yml) is deliberately not a production manifest.
 
-**Linux**: installs a systemd user service (`~/.config/systemd/user/ssbnk-remote-upload.service`). Requires `inotify-tools`.
+For UI-only work, start the Go service on `127.0.0.1:8080`, then run
+`npm run dev` in `ui/`. Astro proxies API and hosted-image requests to that
+backend. `PUBLIC_API_URL` is optional; production defaults to same-origin.
 
-**macOS**: installs a launchd agent (`~/Library/LaunchAgents/sh.delo.ss.remote-upload.plist`). Requires `fswatch` (the installer offers to `brew install` it). If your screenshots save to Desktop/Documents/Downloads, macOS requires a one-time privacy grant — the installer detects this, shows you exactly where to click in System Settings, and waits until the permission is in place before finishing.
+## Source versus deployment ownership
 
-Both paths end with an end-to-end test: a probe screenshot is dropped into your watch folder and the installer confirms it lands on the host.
+| Repository | Owns |
+| --- | --- |
+| `~/code/ssbnk` | Go/UI source, tests, Dockerfile, dev Compose, release workflow |
+| `~/docker` | Pinned production digest, mounts, routing, secrets references, systemd units, rollback history |
 
-## API Endpoints
+This split keeps the application independently buildable while every running
+stack remains visible and auditable in the central DeLoContainers hub. See
+[`DEPLOYMENT.md`](DEPLOYMENT.md).
+
+## API
 
 | Endpoint | Method | Description |
-|---|---|---|
-| `/latest` | GET | Metadata-driven latest screenshot lookup |
-| `/hybrid` | GET | Metadata + filesystem fallback lookup |
-| `/stateless` | GET | Filesystem-only lookup |
-| `/upload` | POST | Remote upload (requires `X-Upload-Key` header) |
-| `/health` | GET | Metadata/file consistency status |
+| --- | --- | --- |
+| `/api/screenshots` | GET | Paginated gallery metadata |
+| `/latest[/N]` | GET | Metadata-driven latest screenshot redirect |
+| `/hybrid[/N]` | GET | Metadata with filesystem fallback |
+| `/stateless[/N]` | GET | Filesystem-only lookup |
+| `/upload` | POST | Remote upload; requires `X-Upload-Key` |
+| `/health` | GET | Service and metadata consistency status |
 
-## Scripts
+## Remote clients and paste-image helper
 
-| Script | Purpose |
-|---|---|
-| `scripts/paste-image.sh` | Paste last screenshot as image via Ctrl+Shift+V |
-| `scripts/remote-screenshot-upload.sh` | Uploader that runs on remote machines (inotifywait/fswatch → POST /upload) |
-| `scripts/install-remote-client.sh` | Interactive remote-client installer (service registration, macOS privacy wizard, e2e test) |
-| `scripts/cleanup.sh` | Retention-based file cleanup (runs via cron container) |
+Run `scripts/install-remote-client.sh` from a clone to install the Linux or
+macOS upload watcher. Credentials belong in the client's private runtime config,
+not this repository.
+
+`scripts/paste-image.sh` reads the canonical state marker and puts the image
+payload on the Wayland clipboard before simulating paste. Its host data roots
+can be overridden with `SSBNK_STATE_DIR` and `SSBNK_HOSTED_DIR`.
 
 ## License
 
-MIT License - see [LICENSE](https://github.com/delorenj/ssbnk/blob/main/LICENSE) for details.
+[MIT](LICENSE)

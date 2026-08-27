@@ -1,63 +1,117 @@
-# Architecture — Watcher (Go backend)
+# Go service architecture
 
-## Executive summary
+The `watcher/` package builds one `ssbnk` binary. Its command dispatcher keeps
+the long-running web service, one-shot retention maintenance, and desktop
+clipboard integration in a single versioned artifact while letting Compose
+isolate each role.
 
-A single Go binary (`watcher/main.go`, ~1400 LOC) is the entire ssbnk runtime: it watches screenshot/screencast directories with fsnotify, normalizes and hosts the assets, converts videos to GIF via ffmpeg, writes JSON metadata sidecars, serves an HTTP API plus the Astro management UI, and integrates with the host clipboard. Deployed as the `ssbnk-watcher` container behind Traefik at `ss.delo.sh`.
+## Command surface
 
-## Technology stack
+The binary accepts the following commands:
 
-| Category | Technology | Version | Justification |
-|---|---|---|---|
-| Language | Go | 1.21 | Single static binary, goroutines for watch/HTTP concurrency |
-| File watching | fsnotify | v1.7.0 | Standard Go filesystem events |
-| IDs | google/uuid | v1.6.0 | Metadata sidecar filenames |
-| HTTP | net/http | stdlib | No framework; one `withHeaders` middleware |
-| Video | ffmpeg | subprocess | Video→GIF with palette gen/use |
-| Clipboard | wl-clipboard / xclip | subprocess | Host clipboard from inside container via mounted sockets |
-| Container | Alpine + multi-stage | — | `watcher/Dockerfile`: go-builder → ui-builder → runtime |
+| Command | Lifecycle | Responsibility |
+| --- | --- | --- |
+| `ssbnk` or `ssbnk serve` | Long-running | Watch, ingest, convert, host, and serve the UI and API |
+| `ssbnk cleanup` | One-shot | Apply retention and repair state markers |
+| `ssbnk cleanup --dry-run` | One-shot, read-only | Validate data and print the planned actions |
+| `ssbnk clipboard-bridge` | Long-running | Copy new `latest-url` values with `wl-copy` |
+| `ssbnk help` | One-shot | Print command help |
 
-## Architecture pattern
+Invalid commands and invalid arguments exit with status 2. Runtime failures
+exit with status 1.
 
-Single-process event-driven service. One fsnotify watcher goroutine dispatches ingestion goroutines; an HTTP server goroutine serves reads. State is the filesystem itself (`hosted/` + `metadata/`) — no database, no in-memory index.
+## Source layout
 
-## Ingestion pipeline
+The Go runtime is split by responsibility:
 
-- **Images** (png/jpg/jpeg/gif/webp, Create or Rename events): 100 ms debounce → `processScreenshot` → renamed to `YYYYMMDD-HHMM.png` (collision suffix `-N`), copied to `hosted/`, original deleted, metadata written, `/tmp/ssbnk/last-screenshot` updated, URL copied to clipboard.
-  - **GIF special case:** a `.gif` with mtime < 5 s is assumed to be a fresh video conversion — moved keeping its name, plus notification sound + browser open. (Racy heuristic; a slow real-GIF save can be misrouted.)
-- **Videos** (mp4/avi/mov/mkv/webm/flv/wmv): `trackVideoFile` waits for size/mtime stability (6×500 ms polls, escalates to 12, 10-min cap, exclusive-open check) → `processVideo` → ffmpeg (`-t 10 -vf "fps=10,scale=640:-1:lanczos,palettegen/paletteuse" -loop 0`, up to 3 retries) → GIF moved to `hosted/`, original video deleted.
-- **Remote uploads:** `POST /upload` (X-Upload-Key auth, 50 MB) → same storage/metadata/clipboard path.
+- `watcher/cli.go` dispatches commands and reads common configuration.
+- `watcher/main.go` implements ingestion, media conversion, HTTP routes, and
+  static serving.
+- `watcher/state.go` publishes atomic state markers and implements the
+  clipboard bridge.
+- `watcher/cleanup.go` plans and executes native retention cleanup.
+- Files ending in `_test.go` cover the command surface, endpoints, state
+  publication, clipboard retries, ingestion, and cleanup safety.
 
-## API design
+## Serve architecture
 
-See [api-contracts-watcher.md](./api-contracts-watcher.md). Highlights: `/api/screenshots` (paginated JSON for the UI), `/latest` (metadata-only), `/hybrid` (metadata + filesystem fallback), `/stateless` (filesystem-only), `/upload` (only authenticated endpoint), `/health` (consistency check, always 200). Hosted assets served root-level; unknown paths fall through to the Astro `index.html`.
+`serve` creates the hosted and metadata directories, watches the configured
+screenshot and screencast directories with `fsnotify`, and starts the HTTP
+server. It handles create and rename events in goroutines so one ingestion
+doesn't block later filesystem events.
 
-## Data architecture
+The ingestion paths are:
 
-See [data-models-watcher.md](./data-models-watcher.md). One `ScreenshotMetadata` JSON per asset in `metadata/<uuid>.json`; filesystem is the source of truth for bytes. `description`/`batch_id`/`repo_name` fields are declared but never set.
+- Screenshots receive a `YYYYMMDD-HHMM` name with a collision suffix when
+  needed. Non-GIF screenshots use a `.png` destination name.
+- Fresh GIFs are moved directly into hosted storage.
+- Videos are monitored for size and modification-time stability, converted to
+  a ten-second looping GIF with `ffmpeg`, and then stored.
+- Authenticated HTTP uploads accept PNG, JPEG, GIF, and WebP files up to 50 MB.
 
-## Component overview
+Local screenshot and screencast ingestion removes the source file after the
+hosted copy succeeds. Those source mounts must therefore be read-write.
 
-- `main()` — env config, watcher setup, starts API server, blocks on `select{}`
-- Event loop (`main.go:80-112`) — dispatch on Create/Rename
-- `processScreenshot` / `processVideo` / `trackVideoFile` — ingestion
-- `handle*` functions — HTTP API (see contracts doc)
-- `copyToClipboard` — wl-copy → xclip → FIFO → HTTP fallback chain
-- `writeLastScreenshotPath` — paste-image bridge
-- `logMemoryUsage` — logs MemStats every 30 s forever (debug leftover)
+Each successful path stores the asset, writes a `ScreenshotMetadata` sidecar,
+and publishes the `last-screenshot` and `latest-url` markers. Desktop failures
+don't invalidate the stored upload.
 
-## Deployment
+## HTTP architecture
 
-Built by `watcher/Dockerfile` (3-stage, includes the Astro UI build) → `delorenj/ssbnk-watcher`. Compose service on the external `proxy` network with Traefik labels; Wayland/X11 sockets and `/tmp/ssbnk` bind-mounted for host integration. See [deployment-guide.md](./deployment-guide.md).
+The Go `net/http` server listens on `SSBNK_API_PORT`, which defaults to port 80.
+It serves the management UI, hosted assets, and API from one origin. The
+current routes are documented in the
+[HTTP API contract](./api-contracts-watcher.md).
 
-## Testing strategy
+All responses receive basic security headers and permissive CORS headers.
+Image responses also receive a one-day immutable cache directive. Traefik
+terminates production TLS and forwards directly to this server.
 
-Intended: `go test ./...` (mise `test`). **Current state: broken.** `main_test.go` doesn't compile (stale `Config` field names); `test_hybrid_endpoints.go` is misnamed so its real endpoint tests never run but ship in the binary. Manual testing per CONTRIBUTING.md's X11+Wayland checklist.
+## State publication and clipboard isolation
 
-## Known risks / debt
+`serve` never invokes a desktop command. It writes state through temporary
+files and atomic renames in this order:
 
-- `watcher/ssbnk-watcher`: 9.8 MB compiled binary tracked in git (ignore rule inert — already tracked)
-- `watcher/main.go.backup`: stale backup tracked in git
-- Blocking FIFO opens (`/tmp/ssbnk-clipboard`, `/tmp/ssbnk-browser`) can hang goroutines indefinitely
-- Non-GIF files are force-renamed to `.png` without transcoding
-- Non-recursive directory watch; no graceful shutdown
-- All read endpoints unauthenticated with permissive CORS (by design)
+1. `/data/state/last-screenshot` receives the hosted filename.
+2. `/data/state/latest-url` receives the public URL and acts as the trigger.
+
+`clipboard-bridge` watches the state directory with `fsnotify` and polls every
+two seconds by default. It reads the current URL at startup, ignores values
+already copied successfully, and retries failed writes during polling. Each
+`wl-copy` invocation has a two-second default timeout.
+
+You can tune the bridge with `SSBNK_CLIPBOARD_POLL_INTERVAL` and
+`SSBNK_CLIPBOARD_TIMEOUT`, using Go duration syntax such as `500ms` or `3s`.
+
+## Native cleanup architecture
+
+Cleanup uses a plan-then-mutate design. It obtains a nonblocking exclusive
+lock on the data directory, strictly decodes relevant JSON metadata, validates
+every destination, and constructs the full action set before changing files.
+
+The command then performs these operations:
+
+1. Move hosted files older than `SSBNK_HOSTED_RETENTION_DAYS` into today's
+   dated archive unless any matching metadata has `preserve: true`.
+2. Move every matching JSON sidecar beside its archived asset.
+3. Delete archive directories older than `SSBNK_ARCHIVE_RETENTION_DAYS` only
+   when their names are valid `YYYY-MM-DD` dates.
+4. Remove root metadata whose asset exists in neither hosted nor retained
+   archive storage.
+5. Repair or clear the state markers when the previous latest asset moved.
+
+Cleanup refuses target collisions and rolls back completed moves if a later
+move fails. `--dry-run` prints the same plan without mutating the data tree.
+The legacy `SSBNK_RETENTION_DAYS` variable remains a fallback for hosted-file
+retention.
+
+## Container image
+
+The root `Dockerfile` is the only application image definition. It builds the
+Go executable, builds the Astro UI, copies both into Alpine 3.22, installs
+`ffmpeg` and `wl-clipboard`, and runs as UID and GID 1000. The image entry point
+is `/usr/local/bin/ssbnk`, and its default command is `serve`.
+
+The public container doesn't mount a Wayland or X11 socket. Production reuses
+the image for a network-disabled clipboard bridge and network-disabled cleanup
+job. See the [deployment guide](./deployment-guide.md).

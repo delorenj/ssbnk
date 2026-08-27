@@ -1,49 +1,85 @@
 {
-  "repository_type": "multi-part",
+  "repository_type": "multi-part-single-image",
   "parts": [
     {
-      "part_id": "watcher",
-      "display_name": "Watcher/API (Go)",
-      "project_type_id": "backend",
+      "part_id": "runtime",
+      "display_name": "ssbnk runtime",
+      "project_type_id": "backend-cli",
       "root_path": "watcher/",
-      "entry_point": "watcher/main.go",
-      "tech_stack": "Go 1.21, fsnotify, google/uuid, ffmpeg (subprocess)"
+      "entry_point": "watcher/cli.go",
+      "tech_stack": "Go 1.26 module, fsnotify, net/http, ffmpeg",
+      "notes": "One binary exposes serve, cleanup, and clipboard-bridge commands."
     },
     {
       "part_id": "ui",
-      "display_name": "Management UI (Astro/React)",
+      "display_name": "Embedded management UI",
       "project_type_id": "web",
       "root_path": "ui/",
       "entry_point": "ui/src/pages/index.astro",
-      "tech_stack": "Astro 6, React 19, TypeScript, Tailwind 4, shadcn (@base-ui/react)",
-      "notes": "Has its own .git directory (separate repo). Static build served by the watcher."
-    },
-    {
-      "part_id": "web",
-      "display_name": "Nginx Static Hosting (legacy)",
-      "project_type_id": "infra",
-      "root_path": "web/",
-      "entry_point": "web/default.conf",
-      "tech_stack": "Nginx",
-      "notes": "Retired 3-container architecture; only used by the packaged all-in-one image. web/html/ holds live hosted assets."
+      "tech_stack": "Astro 7, React 19, TypeScript, Tailwind CSS 4, shadcn",
+      "notes": "Static build is embedded at /ui and calls the API same-origin by default."
     },
     {
       "part_id": "scripts",
-      "display_name": "Remote/Automation Scripts (Bash)",
+      "display_name": "Host and remote-client utilities",
       "project_type_id": "cli",
       "root_path": "scripts/",
-      "entry_point": "scripts/paste-image.sh, scripts/remote-screenshot-upload.sh, scripts/cleanup.sh",
-      "tech_stack": "Bash/POSIX sh, inotifywait, wl-clipboard, ydotool, curl",
-      "notes": "Roughly half the scripts are legacy (Syncthing-era sync, clipboard bridge experiments, volume helpers)."
+      "entry_point": "scripts/paste-image.sh, scripts/remote-screenshot-upload.sh",
+      "tech_stack": "Bash, curl, inotify or fswatch, wl-clipboard, ydotool",
+      "notes": "Runtime cleanup and URL clipboard delivery are native Go commands, not scripts."
+    },
+    {
+      "part_id": "image",
+      "display_name": "Canonical container image",
+      "project_type_id": "infra",
+      "root_path": "Dockerfile",
+      "entry_point": "/usr/local/bin/ssbnk",
+      "tech_stack": "Docker multi-stage build, Alpine 3.22",
+      "notes": "Source owns Dockerfile, compose.dev.yml, and publishing CI; ~/docker owns production deployment."
     }
   ],
   "integration_points": [
-    {"from": "scripts (remote machines)", "to": "watcher", "type": "REST", "details": "POST /upload, X-Upload-Key auth, multipart ≤50MB"},
-    {"from": "ui", "to": "watcher", "type": "REST", "details": "GET /api/screenshots (limit/offset); same-origin in production"},
-    {"from": "watcher", "to": "host OS", "type": "clipboard", "details": "Wayland socket mount + wl-copy; FIFO/HTTP fallbacks"},
-    {"from": "watcher", "to": "scripts/paste-image.sh", "type": "shared-file", "details": "/tmp/ssbnk/last-screenshot via bind mount"},
-    {"from": "traefik", "to": "watcher", "type": "reverse-proxy", "details": "ss.delo.sh → :80, LE TLS, /health LB check"},
-    {"from": "ssbnk-cleanup", "to": "watcher data dirs", "type": "shared-volumes", "details": "retention archiving via cleanup.sh cron"},
-    {"from": "web (nginx)", "to": "watcher", "type": "reverse-proxy (legacy)", "details": "/latest + /upload → :31243, packaged image only"}
+    {
+      "from": "ui",
+      "to": "runtime serve",
+      "type": "same-origin REST",
+      "details": "GET /api/screenshots plus root-level hosted assets"
+    },
+    {
+      "from": "remote clients",
+      "to": "runtime serve",
+      "type": "authenticated REST",
+      "details": "POST /upload with X-Upload-Key and multipart file"
+    },
+    {
+      "from": "runtime serve",
+      "to": "clipboard bridge",
+      "type": "atomic state markers",
+      "details": "/data/state/latest-url and last-screenshot"
+    },
+    {
+      "from": "clipboard bridge",
+      "to": "host Wayland compositor",
+      "type": "exact socket and wl-copy",
+      "details": "No network and no full runtime-directory mount"
+    },
+    {
+      "from": "cleanup",
+      "to": "runtime data",
+      "type": "shared filesystem",
+      "details": "Native retention with exclusive lock and optional dry run"
+    },
+    {
+      "from": "production Traefik",
+      "to": "runtime serve",
+      "type": "reverse proxy",
+      "details": "ss.delo.sh to port 80 on external proxy network"
+    },
+    {
+      "from": "source repository CI",
+      "to": "deployment hub",
+      "type": "immutable image promotion",
+      "details": "Publish canonical image, then pin its digest in ~/docker"
+    }
   ]
 }

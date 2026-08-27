@@ -8,32 +8,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Initial release of ssbnk (ScreenShot Bank)
-- Automatic screenshot detection and hosting
-- Cross-platform clipboard support (X11 and Wayland)
-- Smart cleanup with configurable retention
-- Docker Compose deployment
-- Traefik integration with automatic TLS
-- Comprehensive documentation
 
-### Features
-- 📸 Instant screenshot hosting via HTTPS
-- 📋 Automatic URL copying to clipboard
-- 🗑️ Smart cleanup with daily archiving
-- 🖥️ Display server agnostic (X11/Wayland)
-- 🔒 Secure by default with reverse proxy
-- 🐳 Containerized deployment
-- ⚡ Lightning-fast Go-powered file watcher
-- 🎯 Zero configuration setup
+- Native `cleanup` command with independent hosted/archive retention, locking,
+  collision protection, metadata validation, and dry-run support.
+- `clipboard-bridge` command backed by atomic state markers and a narrowly
+  scoped Wayland sidecar.
+- Dev-only Compose stack and same-origin Astro development proxy.
+- Immutable multi-architecture image metadata and SHA tags in CI.
 
-### Technical Details
-- Go-based file watcher with fsnotify
-- Nginx static file serving with optimized caching
-- Alpine Linux containers for minimal footprint
-- Automatic display server detection
-- Multiple clipboard access methods with fallbacks
-- Metadata tracking for all screenshots
-- Configurable retention policies
+### Changed
+
+- Consolidated the Go service, Astro frontend, cleanup, and clipboard helper
+  into the canonical `delorenj/ssbnk` image.
+- Moved production Compose, routing, secret injection, and scheduling policy to
+  the DeLoContainers infrastructure hub.
+- Updated Astro and frontend dependencies; `npm audit` reports zero known
+  vulnerabilities.
+- Pinned the build and local toolchain to patched Go 1.26.7 and updated the
+  transitive `x/sys` dependency.
+
+### Fixed
+
+- Preserved content-derived PNG/JPEG/GIF/WebP extensions for watched images
+  instead of relabeling every asset as PNG.
+- Made watched-image and converted-video publication collision-safe and durable;
+  a metadata failure now rolls back the hosted asset and leaves the source in
+  place for recovery.
+
+### Security
+
+- Bounded upload bodies and files, rejected MIME-spoofed uploads, used a
+  constant-time credential comparison, and removed partial uploads on failure.
+
+### Removed
+
+- Legacy Nginx/supervisor image, shell cleanup cron, mutable watcher-only image,
+  X11 integration, and broad desktop-runtime mounts.
 
 ## [1.0.0] - 2025-07-14
 

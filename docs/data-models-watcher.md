@@ -1,47 +1,82 @@
-# Data Models — Watcher
+# Data models and filesystem state
 
-ssbnk has no database. State lives in two directories under `SSBNK_DATA_DIR` (default `/data`):
+ssbnk uses the filesystem as its durable state store. The `serve`, `cleanup`,
+and `clipboard-bridge` commands share a small, explicit directory contract
+instead of a database.
 
-- `hosted/` — the served asset files (one per screenshot/GIF)
-- `metadata/` — one JSON sidecar per asset, named `<uuid>.json`
-- `archive/` (host-side, cleanup only) — retention archive organized as `YYYY-MM-DD/`
+## Data tree
 
-## `ScreenshotMetadata` (watcher/main.go:23-34)
+The default `SSBNK_DATA_DIR` is `/data`:
 
-Written by `saveMetadata` with `json.MarshalIndent` (2-space), mode 0644:
+```text
+/data/
+├── hosted/                 # Publicly served assets
+├── metadata/               # Root JSON sidecars for hosted assets
+├── archive/
+│   └── YYYY-MM-DD/         # Archived asset and sidecar pairs
+└── state/
+    ├── last-screenshot     # Latest hosted filename
+    └── latest-url          # Latest public URL and clipboard trigger
+```
+
+`SSBNK_STATE_DIR` can place the state directory elsewhere, but the production
+stack keeps it under `/data/state`.
+
+## Screenshot metadata
+
+Each stored asset normally has one JSON sidecar named `<uuid>.json` in
+`metadata/`. The Go `ScreenshotMetadata` structure has this shape:
 
 ```json
 {
-  "id":            "uuid — matches the metadata filename",
-  "original_name": "source filename before normalization",
-  "filename":      "hosted filename, e.g. 20260214-1147.png",
-  "url":           "BaseURL + filename",
-  "timestamp":     "RFC3339",
-  "description":   "omitempty — declared but never set by any code path",
-  "batch_id":      "omitempty — declared but never set",
-  "preserve":      false,
-  "repo_name":     "omitempty — declared but never set",
-  "size":          12345
+  "id": "92ef3c67-b7d8-4fd2-b58e-4ccfb8521800",
+  "original_name": "Screenshot 2026-08-27.png",
+  "filename": "20260827-1430.png",
+  "url": "https://ss.delo.sh/20260827-1430.png",
+  "timestamp": "2026-08-27T14:30:00-04:00",
+  "description": "optional",
+  "batch_id": "optional",
+  "preserve": false,
+  "repo_name": "optional",
+  "size": 12345
 }
 ```
 
-- `description`, `batch_id`, `repo_name` are struct-only leftovers; the backfill tools (`scripts/generate-missing-metadata.*`) also omit them.
-- `preserve: true` is honored by `scripts/cleanup.sh` (skips archiving) but nothing currently sets it.
-- Gap-fill entries synthesized by `/api/screenshots` contain only `filename`, `url`, `timestamp`, `size`.
+The API synthesizes minimal records for hosted assets that don't have a
+sidecar. Cleanup, however, strictly decodes relevant metadata and fails before
+mutation if a JSON file is malformed, contains unknown fields, has trailing
+data, or contains an unsafe filename.
 
-## File naming
+## Asset names
 
-`YYYYMMDD-HHMM<ext>` (minute granularity, local time), with `-N` collision suffixes. Non-GIF screenshots are copied to `hosted/` with a forced `.png` extension **regardless of actual format** — a `.jpg`/`.webp` upload becomes `.png`-named with non-PNG bytes (browsers sniff content, so it works, but the name lies).
+Local ingestion uses `YYYYMMDD-HHMM<extension>` and adds `-N` for collisions.
+Current non-GIF screenshot handling gives destination files a `.png` suffix
+without transcoding their bytes. Video ingestion produces `.gif` output.
 
-## `/tmp/ssbnk/last-screenshot`
+## State markers
 
-Contains just the **basename** of the most recently ingested file (no newline, mode 0644). Written after every successful ingestion (screenshot, GIF, video, upload). The `/tmp/ssbnk` dir is bind-mounted into the watcher container so the host-side `scripts/paste-image.sh` can resolve the filename against `web/html/`.
+Successful ingestion atomically publishes two newline-terminated text files:
 
-## Retention (`scripts/cleanup.sh`)
+- `last-screenshot` contains a hosted basename such as
+  `20260827-1430.png`.
+- `latest-url` contains its public URL and triggers the clipboard bridge.
 
-Runs daily at 02:00 in the `ssbnk-cleanup` Alpine container. `SSBNK_RETENTION_DAYS` (default 30):
+The service writes `last-screenshot` first so a bridge reacting to
+`latest-url` always sees the matching filename. Cleanup repairs both markers
+to a remaining hosted asset after archival or removes both when no hosted
+image remains.
 
-1. Moves hosted files older than retention to `archive/YYYY-MM-DD/` (skips `preserve: true`)
-2. Archives matching metadata
-3. Deletes archive dirs older than retention
-4. Removes orphaned metadata
+## Retention model
+
+Cleanup applies two independent periods:
+
+- `SSBNK_HOSTED_RETENTION_DAYS` controls when an unpreserved hosted file moves
+  into today's archive. If unset, it falls back to the legacy
+  `SSBNK_RETENTION_DAYS`, then 30 days.
+- `SSBNK_ARCHIVE_RETENTION_DAYS` controls when a valid dated archive directory
+  is deleted. It defaults to 30 days.
+
+`preserve: true` prevents a hosted asset from being archived. Unknown archive
+directory names are never age-deleted. Cleanup also prevents overwrites,
+removes root metadata only when its asset is absent from hosted and retained
+archive storage, and holds an exclusive lock on the data directory.
