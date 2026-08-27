@@ -1,40 +1,41 @@
 installation:
-  version: 6.10.1-next.20
+  version: 6.11.1-next.27
   installDate: 2026-07-23T14:36:39.103Z
-  lastUpdated: 2026-07-23T14:36:39.103Z
+  lastUpdated: 2026-08-27T14:49:40.625Z
+  installShims: true
 modules:
   - name: core
-    version: 6.10.1-next.20
+    version: 6.11.1-next.27
     installDate: 2026-07-23T14:36:39.047Z
-    lastUpdated: 2026-07-23T14:36:39.101Z
+    lastUpdated: 2026-08-27T14:49:40.623Z
     source: built-in
     npmPackage: null
     repoUrl: null
   - name: bmm
-    version: 6.10.1-next.20
+    version: 6.11.1-next.27
     installDate: 2026-07-23T14:36:39.060Z
-    lastUpdated: 2026-07-23T14:36:39.101Z
+    lastUpdated: 2026-08-27T14:49:40.623Z
     source: built-in
     npmPackage: null
     repoUrl: null
   - name: bmb
     version: main
     installDate: 2026-07-23T14:36:39.074Z
-    lastUpdated: 2026-07-23T14:36:39.102Z
+    lastUpdated: 2026-08-27T14:49:40.624Z
     source: external
     npmPackage: bmad-builder
     repoUrl: https://github.com/bmad-code-org/bmad-builder
     channel: next
-    sha: e6935f2776c34ffd9b18f4ef1e334584ef10a50f
+    sha: 38df19573f493c5025c7efce331debe8498832c1
   - name: cis
     version: main
     installDate: 2026-07-23T14:36:39.080Z
-    lastUpdated: 2026-07-23T14:36:39.103Z
+    lastUpdated: 2026-08-27T14:49:40.625Z
     source: external
     npmPackage: bmad-creative-intelligence-suite
     repoUrl: https://github.com/bmad-code-org/bmad-module-creative-intelligence-suite
     channel: next
-    sha: 07a8dd03d196a762f21c241d985293fe5b0f90e7
+    sha: 0e4ff9233a792db1a1cd00f22a482f338168cdc3
 ides:
   - claude-code
   - codex
