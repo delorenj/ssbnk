@@ -17,14 +17,15 @@ import (
 func createTestConfig(tb testing.TB) (Config, string) {
 	tb.Helper()
 	tempDir := tb.TempDir()
-	
+
 	config := Config{
 		ScreenshotDir: filepath.Join(tempDir, "screenshots"),
 		ScreencastDir: filepath.Join(tempDir, "screencasts"),
 		DataDir:       filepath.Join(tempDir, "data"),
+		StateDir:      filepath.Join(tempDir, "state"),
 		BaseURL:       "http://test.example.com",
 	}
-	
+
 	// Create required directories
 	dirs := []string{
 		filepath.Join(config.DataDir, "hosted"),
@@ -32,13 +33,13 @@ func createTestConfig(tb testing.TB) (Config, string) {
 		config.ScreenshotDir,
 		config.ScreencastDir,
 	}
-	
+
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			tb.Fatalf("Failed to create test directory %s: %v", dir, err)
 		}
 	}
-	
+
 	return config, tempDir
 }
 
@@ -47,7 +48,7 @@ func createTestData(tb testing.TB, config Config) {
 	tb.Helper()
 	hostedDir := filepath.Join(config.DataDir, "hosted")
 	metadataDir := filepath.Join(config.DataDir, "metadata")
-	
+
 	// Create test image files with different timestamps
 	testFiles := []struct {
 		filename string
@@ -57,7 +58,7 @@ func createTestData(tb testing.TB, config Config) {
 		{"20240101-1300.png", time.Second},
 		{"20240101-1400.gif", 2 * time.Second},
 	}
-	
+
 	for i, testFile := range testFiles {
 		// Create the hosted file
 		time.Sleep(testFile.delay) // Ensure different modification times
@@ -66,7 +67,7 @@ func createTestData(tb testing.TB, config Config) {
 		if err := os.WriteFile(hostedPath, []byte(content), 0644); err != nil {
 			tb.Fatalf("Failed to create test file %s: %v", testFile.filename, err)
 		}
-		
+
 		// Create corresponding metadata
 		metadata := ScreenshotMetadata{
 			ID:           fmt.Sprintf("test-id-%d", i),
@@ -78,7 +79,7 @@ func createTestData(tb testing.TB, config Config) {
 			Preserve:     false,
 			Size:         int64(len(content)),
 		}
-		
+
 		metadataPath := filepath.Join(metadataDir, fmt.Sprintf("%s.json", metadata.ID))
 		if err := saveMetadata(metadata, metadataPath); err != nil {
 			tb.Fatalf("Failed to save test metadata: %v", err)
@@ -89,32 +90,32 @@ func createTestData(tb testing.TB, config Config) {
 func TestHybridEndpoint_WithValidMetadata(t *testing.T) {
 	config, _ := createTestConfig(t)
 	createTestData(t, config)
-	
+
 	// Test hybrid endpoint with offset 0 (latest)
 	req := httptest.NewRequest("GET", "/hybrid/0", nil)
 	w := httptest.NewRecorder()
-	
+
 	handleLatestHybrid(w, req, config)
-	
+
 	if w.Code != http.StatusFound {
 		t.Errorf("Expected status %d, got %d", http.StatusFound, w.Code)
 	}
-	
+
 	location := w.Header().Get("Location")
 	if location == "" {
 		t.Error("Expected redirect location, got empty")
 	}
-	
+
 	log.Printf("✅ Hybrid endpoint test passed - redirected to: %s", location)
 }
 
 func TestStatelessEndpoint_FilesystemOnly(t *testing.T) {
 	config, _ := createTestConfig(t)
-	
+
 	// Create files WITHOUT metadata
 	hostedDir := filepath.Join(config.DataDir, "hosted")
 	testFiles := []string{"test1.png", "test2.gif", "test3.png"}
-	
+
 	for i, filename := range testFiles {
 		time.Sleep(10 * time.Millisecond) // Ensure different mod times
 		filePath := filepath.Join(hostedDir, filename)
@@ -123,45 +124,45 @@ func TestStatelessEndpoint_FilesystemOnly(t *testing.T) {
 			t.Fatalf("Failed to create test file: %v", err)
 		}
 	}
-	
+
 	// Test stateless endpoint
 	req := httptest.NewRequest("GET", "/stateless/0", nil)
 	w := httptest.NewRecorder()
-	
+
 	handleLatestStateless(w, req, config)
-	
+
 	if w.Code != http.StatusFound {
 		t.Errorf("Expected status %d, got %d", http.StatusFound, w.Code)
 	}
-	
+
 	location := w.Header().Get("Location")
 	if location == "" {
 		t.Error("Expected redirect location, got empty")
 	}
-	
+
 	log.Printf("✅ Stateless endpoint test passed - redirected to: %s", location)
 }
 
 func TestHealthCheckEndpoint(t *testing.T) {
 	config, _ := createTestConfig(t)
 	createTestData(t, config)
-	
+
 	req := httptest.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
-	
+
 	handleHealthCheck(w, req, config)
-	
+
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
 	}
-	
+
 	// Parse response
 	var health map[string]interface{}
 	body, _ := io.ReadAll(w.Body)
 	if err := json.Unmarshal(body, &health); err != nil {
 		t.Fatalf("Failed to parse health response: %v", err)
 	}
-	
+
 	// Check required fields
 	if health["status"] == nil {
 		t.Error("Health response missing status field")
@@ -172,40 +173,40 @@ func TestHealthCheckEndpoint(t *testing.T) {
 	if health["actual_file_count"] == nil {
 		t.Error("Health response missing actual_file_count field")
 	}
-	
+
 	log.Printf("✅ Health check test passed - status: %s", health["status"])
 	log.Printf("   Metadata count: %v, Actual files: %v", health["metadata_count"], health["actual_file_count"])
 }
 
 func TestHybridFallback_MetadataMissing(t *testing.T) {
 	config, _ := createTestConfig(t)
-	
+
 	// Create only hosted files, no metadata
 	hostedDir := filepath.Join(config.DataDir, "hosted")
 	filename := "fallback-test.png"
 	filePath := filepath.Join(hostedDir, filename)
-	
+
 	if err := os.WriteFile(filePath, []byte("fallback test content"), 0644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
-	
+
 	// Test hybrid endpoint - should fall back to filesystem scan
 	req := httptest.NewRequest("GET", "/hybrid/0", nil)
 	w := httptest.NewRecorder()
-	
+
 	handleLatestHybrid(w, req, config)
-	
+
 	if w.Code != http.StatusFound {
 		t.Errorf("Expected status %d, got %d", http.StatusFound, w.Code)
 	}
-	
+
 	location := w.Header().Get("Location")
 	expectedURL := fmt.Sprintf("%s/%s", config.BaseURL, filename)
-	
+
 	if location != expectedURL {
 		t.Errorf("Expected redirect to %s, got %s", expectedURL, location)
 	}
-	
+
 	log.Printf("✅ Hybrid fallback test passed - fell back to filesystem scan")
 }
 
@@ -221,14 +222,14 @@ func TestOffsetParsing(t *testing.T) {
 		{"/health", 0},
 		{"/invalid/path", 0},
 	}
-	
+
 	for _, test := range tests {
 		result := parseOffsetFromURL(test.path)
 		if result != test.expected {
 			t.Errorf("parseOffsetFromURL(%s) = %d, expected %d", test.path, result, test.expected)
 		}
 	}
-	
+
 	log.Printf("✅ Offset parsing tests passed")
 }
 
@@ -236,9 +237,9 @@ func TestOffsetParsing(t *testing.T) {
 func BenchmarkHybridEndpoint(b *testing.B) {
 	config, _ := createTestConfig(b)
 	createTestData(b, config)
-	
+
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		req := httptest.NewRequest("GET", "/hybrid/0", nil)
 		w := httptest.NewRecorder()
@@ -248,7 +249,7 @@ func BenchmarkHybridEndpoint(b *testing.B) {
 
 func BenchmarkStatelessEndpoint(b *testing.B) {
 	config, _ := createTestConfig(b)
-	
+
 	// Create files without metadata for stateless test
 	hostedDir := filepath.Join(config.DataDir, "hosted")
 	for i := 0; i < 10; i++ {
@@ -256,9 +257,9 @@ func BenchmarkStatelessEndpoint(b *testing.B) {
 		filePath := filepath.Join(hostedDir, filename)
 		os.WriteFile(filePath, []byte(fmt.Sprintf("content %d", i)), 0644)
 	}
-	
+
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		req := httptest.NewRequest("GET", "/stateless/0", nil)
 		w := httptest.NewRecorder()

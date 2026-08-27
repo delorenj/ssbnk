@@ -1,0 +1,106 @@
+name: ssbnk-dev
+
+x-app: &app
+  build:
+    context: .
+  image: ssbnk:dev
+  user: "${UID:-1000}:${GID:-1000}"
+  init: true
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  ssbnk:
+    <<: *app
+    command:
+      - serve
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${SSBNK_DEV_PORT:-13143}:80"
+    environment:
+      SSBNK_API_PORT: "80"
+      SSBNK_DATA_DIR: /data
+      SSBNK_SCREENCAST_DIR: /media/screencasts
+      SSBNK_SCREENSHOT_DIR: /media/screenshots
+      SSBNK_STATE_DIR: /data/state
+      SSBNK_UI_DIR: /ui
+      SSBNK_UPLOAD_KEY: "${SSBNK_DEV_UPLOAD_KEY:-development-only}"
+      SSBNK_URL: "http://localhost:${SSBNK_DEV_PORT:-13143}"
+      TZ: "${TZ:-America/New_York}"
+    volumes:
+      - type: bind
+        source: ./.dev-data/data
+        target: /data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.dev-data/screenshots
+        target: /media/screenshots
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.dev-data/screencasts
+        target: /media/screencasts
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:size=256m,uid=1000,gid=1000,mode=1777
+
+  cleanup:
+    <<: *app
+    profiles:
+      - maintenance
+    command:
+      - cleanup
+      - --dry-run
+    network_mode: none
+    restart: "no"
+    environment:
+      SSBNK_ARCHIVE_RETENTION_DAYS: "${SSBNK_ARCHIVE_RETENTION_DAYS:-30}"
+      SSBNK_DATA_DIR: /data
+      SSBNK_HOSTED_RETENTION_DAYS: "${SSBNK_HOSTED_RETENTION_DAYS:-30}"
+      SSBNK_STATE_DIR: /data/state
+      TZ: "${TZ:-America/New_York}"
+    volumes:
+      - type: bind
+        source: ./.dev-data/data
+        target: /data
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:size=64m,uid=1000,gid=1000,mode=1777
+    healthcheck:
+      disable: true
+
+  clipboard:
+    <<: *app
+    profiles:
+      - desktop
+    command:
+      - clipboard-bridge
+    network_mode: none
+    restart: unless-stopped
+    environment:
+      SSBNK_STATE_DIR: /data/state
+      WAYLAND_DISPLAY: "${WAYLAND_DISPLAY:-wayland-0}"
+      XDG_RUNTIME_DIR: /run/user/1000
+    volumes:
+      - type: bind
+        source: ./.dev-data/data/state
+        target: /data/state
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${XDG_RUNTIME_DIR:-/run/user/1000}/${WAYLAND_DISPLAY:-wayland-0}"
+        target: "/run/user/1000/${WAYLAND_DISPLAY:-wayland-0}"
+        read_only: true
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:size=16m,uid=1000,gid=1000,mode=1777
+    healthcheck:
+      disable: true

@@ -17,7 +17,7 @@ interface APIResponse {
   limit: number;
 }
 
-const API_BASE = import.meta.env.PUBLIC_API_URL || "https://ss.delo.sh";
+const API_BASE = (import.meta.env.PUBLIC_API_URL || "").replace(/\/$/, "");
 
 function formatSize(bytes: number): string {
   if (!bytes) return "";
