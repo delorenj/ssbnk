@@ -1,0 +1,11 @@
+# Per-role ignores in agents/hermes/pm/
+
+# The local runtime contains mutable agent state and secrets. It is never a
+# project submodule or publishable project content.
+runtime/
+
+# Provisioning logs are host-local as well.
+.scripts/.provision.log
+.scripts/.last-run
+.scripts/.done-*
+.scripts/.plane-project-id

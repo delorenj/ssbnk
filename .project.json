@@ -7,10 +7,17 @@
     "type": "plane",
     "workspace": "33god",
     "identifier": "SSBN",
-    "board_id": "",
-    "state": "planned"
+    "board_id": "ce150fc4-bfd9-4b6f-9f14-6468c18616e3",
+    "state": "planned",
+    "board_url": "https://plane.delo.sh/33god/projects/ce150fc4-bfd9-4b6f-9f14-6468c18616e3/issues/"
   },
-  "agents": {},
+  "agents": {
+    "ssbnk-pm": {
+      "role": "pm",
+      "role_dir": "agents/hermes/pm",
+      "provisioning_state": "provisioned"
+    }
+  },
   "automation": {
     "reconcile": {
       "enabled": false,

@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# Momo provider dispatcher for ssbnk (pm).
+#
+# The stable, per-repo entrypoint Momo (and `pj audit --profile
+# momo-lifecycle-plane`) uses to reach this project's ticket board. It is a thin
+# seam ON PURPOSE: all real provider logic already lives in
+# .scripts/lib/ticket-provider.sh, which dispatches to
+# .scripts/providers/<provider>.sh based on repo-root .project.json. This file
+# adds no second implementation of that — duplicating it is how a repo ends up
+# with two disagreeing notions of "what board am I bound to".
+#
+# What this adds over calling `tp` directly:
+#   * one discoverable path per role (agents/hermes/<role>/momo) instead of
+#     "source the right lib from the right cwd"
+#   * --help / --smoke, so readiness is checkable without credentials
+#   * the canonical Krebs phase -> tp-band map, so callers reason in lifecycle
+#     phases rather than hardcoding provider labels
+#
+# Operations are forwarded verbatim to `tp`. See the contract at the top of
+# .scripts/lib/ticket-provider.sh: resolve, active_milestone, list_issues,
+# get_issue, comment, transition, create_board, create_issue.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB="$SCRIPT_DIR/.scripts/lib/ticket-provider.sh"
+
+# Canonical lifecycle spec. Phases are Krebs' vocabulary; tp bands are the five
+# normalized states every provider adapter must map. Kept in sync with
+# krebs/spec/lifecycle.v1.yaml — that file is the source of truth.
+LIFECYCLE_SPEC="${KREBS_LIFECYCLE_SPEC:-$HOME/code/33GOD/krebs/spec/lifecycle.v1.yaml}"
+
+usage() {
+  cat <<'MOMO_HELP'
+momo — ticket-board dispatcher for this repo's Hermes role
+
+USAGE
+  momo <operation> [args...]     forward an operation to the bound ticket provider
+  momo --help                    show this help
+  momo --smoke [root|nested]     verify wiring without credentials
+  momo --lifecycle               print the canonical phase -> tp-band map
+  momo --provider                print the resolved provider name
+
+OPERATIONS (implemented by .scripts/providers/<provider>.sh)
+  resolve                        -> {provider, board_id, board_url}
+  active_milestone               -> {id, name, state}
+  list_issues                    -> [ {id,key,title,state,state_type,...} ]
+  get_issue <id>                 -> {id,key,title,description,acceptance,...}
+  comment <id> <body>            -> comment id
+  transition <id> <state>        -> backlog|unstarted|started|in_review|completed|cancelled
+  create_board <name> <id> <d>   -> {board_id, board_url}
+  create_issue [--if-absent] <title> [desc]
+
+The provider and board binding come from repo-root .project.json
+(ticket_provider.*). Credentials come from the environment; see the header of
+the matching .scripts/providers/<provider>.sh.
+MOMO_HELP
+}
+
+# Phase -> tp band, read from the canonical spec when present so this never
+# becomes a stale second copy. The inline fallback exists only so --lifecycle
+# still answers on a host without the 33GOD checkout.
+print_lifecycle() {
+  if [ -r "$LIFECYCLE_SPEC" ] && command -v python3 >/dev/null 2>&1; then
+    python3 - "$LIFECYCLE_SPEC" <<'PY' && return 0
+import sys
+try:
+    import yaml
+except ImportError:
+    sys.exit(1)
+try:
+    spec = yaml.safe_load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+states = spec.get("states") or []
+if not states:
+    sys.exit(1)
+print(f"{'phase':<14} {'tp_band':<12} {'terminal':<9} stale_after")
+for s in states:
+    stale = s.get("staleness_minutes")
+    print(f"{str(s.get('phase')):<14} {str(s.get('tp_band')):<12} "
+          f"{str(bool(s.get('terminal'))).lower():<9} "
+          f"{(str(stale) + 'm') if stale else '-'}")
+PY
+  fi
+  # Fallback: spec unreadable or PyYAML absent.
+  cat <<'FALLBACK'
+phase          tp_band      terminal  stale_after
+backlog        backlog      false     -
+triage         unstarted    false     10m
+refining       unstarted    false     30m
+ready          unstarted    false     -
+in_progress    started      false     120m
+review         in_review    false     15m
+qa             in_review    false     -
+FALLBACK
+  echo "(fallback map: could not read $LIFECYCLE_SPEC)" >&2
+}
+
+require_lib() {
+  if [ ! -r "$LIB" ]; then
+    echo "momo: ticket-provider lib missing: $LIB" >&2
+    echo "momo: run the role's provisioning scripts, or pj migrate hermes.pm-scaffold" >&2
+    return 2
+  fi
+}
+
+# Credential-free wiring check. Verifies the pieces a board call needs are
+# present and resolvable; it deliberately does NOT hit the network, so it is
+# safe in CI and in `pj audit`.
+smoke() {
+  local scope="${1:-root}" rc=0
+  require_lib || return 2
+  # shellcheck source=/dev/null
+  . "$LIB"
+
+  local provider=""
+  provider="$(tp_provider_name 2>/dev/null || true)"
+  if [ -z "$provider" ]; then
+    echo "smoke: no ticket provider resolved (.project.json ticket_provider.type)" >&2
+    rc=1
+  else
+    echo "smoke: provider = $provider"
+  fi
+
+  local impl
+  impl="$(tp_providers_dir 2>/dev/null || true)/${provider}.sh"
+  if [ -n "$provider" ] && [ ! -f "$impl" ]; then
+    echo "smoke: provider adapter missing: $impl" >&2
+    rc=1
+  elif [ -n "$provider" ]; then
+    echo "smoke: adapter   = $impl"
+  fi
+
+  if [ -r "$SCRIPT_DIR/../../../.project.json" ]; then
+    echo "smoke: binding   = repo-root .project.json"
+  else
+    echo "smoke: .project.json not found from $SCRIPT_DIR" >&2
+    rc=1
+  fi
+
+  if [ "$scope" = "nested" ]; then
+    # Nested scope additionally asserts the normalized state vocabulary is
+    # intact, since that is what a nested adapter call would transition against.
+    local missing=""
+    for st in backlog unstarted started in_review completed cancelled; do
+      tp_is_valid_state "$st" || missing="$missing $st"
+    done
+    if [ -n "$missing" ]; then
+      echo "smoke: normalized states missing:$missing" >&2
+      rc=1
+    else
+      echo "smoke: states    = ok (6 normalized)"
+    fi
+  fi
+
+  [ "$rc" -eq 0 ] && echo "smoke: ok ($scope)"
+  return "$rc"
+}
+
+main() {
+  case "${1:---help}" in
+    --help|-h|help) usage ;;
+    --lifecycle)    print_lifecycle ;;
+    --smoke)        shift; smoke "${1:-root}" ;;
+    --provider)
+      require_lib || exit 2
+      # shellcheck source=/dev/null
+      . "$LIB"; tp_provider_name ;;
+    *)
+      require_lib || exit 2
+      # shellcheck source=/dev/null
+      . "$LIB"
+      tp "$@" ;;
+  esac
+}
+
+main "$@"

@@ -1,0 +1,98 @@
+# Hermes agent role manifest.  Tracked in the PROJECT repository.
+# The agent's actual state (memory, sessions, evolving SOUL) lives in the
+# ignored local runtime. This file is the immutable contract for this role.
+
+repo: "ssbnk"
+role: "pm"
+agent_id: "ssbnk-pm"
+display_name: "Ssbnk PM"
+purpose: "pm agent for ssbnk"
+
+# Process-local gateway inference target (empty = inherit from shared
+# ~/.hermes/config.yaml). key_env is a variable NAME only; its secret value is
+# injected at runtime and must never be written here.
+model:
+  provider: ""
+  name: ""
+  base_url: ""
+  api_mode: ""
+  key_env: ""
+
+# Hermes profile name. ~/.hermes/profiles/<name> is a REAL directory managed by
+# `pj migrate hermes.runtime-singleton`: shared config/auth/skills link to the
+# fleet root while role-owned state links into ./runtime. Never replace the
+# named profile with a symlink to runtime.
+profile: "ssbnk-pm"
+
+# Telegram bot identity (one bot per agent — see docs/architecture.md).
+telegram:
+  provisioning_status: "disabled"
+  bot_username: "ssbnk_pm_bot"
+  bot_id: ""
+
+# Slack is opt-in. Credentials live only in runtime/.env; this block records
+# safe provisioning state and the verified auth.test identity.
+slack:
+  provisioning_status: "deferred"
+  team_id: ""
+  team_name: ""
+  bot_user_id: ""
+  bot_id: ""
+  bot_username: ""
+
+# Ticket-provider binding (linear | plane | trello).
+# The heartbeat reconciliation pass talks ONLY to this via .scripts/lib/ticket-provider.sh;
+# swapping providers is a one-line change here. Filled in by 42-ticket-provider.sh.
+ticket_provider:
+  name: "plane"
+  board_id: "ce150fc4-bfd9-4b6f-9f14-6468c18616e3"
+  board_url: "https://plane.delo.sh/33god/projects/ce150fc4-bfd9-4b6f-9f14-6468c1\
+    8616e3/issues/"
+  workspace: "33god"
+  project: "ce150fc4-bfd9-4b6f-9f14-6468c18616e3"
+  # Optional normalized-state name overrides for non-standard boards.
+  in_review: "" # e.g. "In Review"
+  completed: "" # e.g. "Done"
+  cancelled: "" # e.g. "Cancelled"
+
+# Board-reconciliation knobs for the heartbeat sentinel pass.
+reconcile:
+  enabled: false # heartbeat runs the autonomous board-reconciliation pass ONLY when true; default off = checkpoint-only
+  grace_hours: 0 # 0 = no human-approval wait (adversarially-reviewed review-lane = done); set >0 to require a wait
+  auto_review: true # autonomous adversarial review (act, do not wait) on/off
+
+# Plane project (1:1 with this agent) — retained for fleet-registry back-compat.
+plane:
+  # Empty -> resolved from ~/.config/hermes-agent-template/config.toml [plane].workspace
+  workspace: "33god"
+  # identifier is set by .scripts/42-ticket-provider.sh after creation (plane only)
+  identifier: "SSBN"
+
+# Bloodbank ingress is owned by one fleet-shared Hermes gateway. The gateway
+# reads the fleet registry and routes canonical commands by target_agent_id;
+# this profile does not install its own NATS consumer or inbox bridge.
+bloodbank:
+  # Quarantine gate: discovery is safe; execution requires explicit activation.
+  enabled: false
+  gateway_scope: fleet
+  target_agent_id: "ssbnk-pm"
+  producer: "hermes-agent:ssbnk-pm"
+
+# Pure-local role-owned state. HERMES_HOME itself is the named profile directory
+# above; the legacy GitHub identity remains metadata-only for locating old
+# archives, and provisioning never creates or attaches a submodule.
+runtime:
+  # Empty owner -> resolved from config.toml [github].runtime_repo_owner.
+  github_owner: ""
+  github_repo: "agent-hm-ssbnk-pm"
+  local_path: "./runtime"
+  checkpoint:
+    cadence: "disabled"
+    on_session_end: false
+
+# Provenance — managed by the template, do not hand-edit.
+provisioned_at: "2026-08-27T11:20:25Z"
+provisioned_by: hermes-agent-template
+deployment:
+  local_only: false
+  systemd: required
