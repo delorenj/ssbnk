@@ -28,7 +28,7 @@ question — not three vague ones.
 
 ## Default contract (every role)
 
-Envelope shape: CloudEvents 1.0, type `bloodbank.v1.<domain>.<entity>.<action>`,
+Envelope shape: CloudEvents 1.0, type `bloodbank.<domain>.<entity>.<action>`,
 `actor.agent_id = ssbnk-pm`, `producer = hermes-agent:ssbnk-pm`,
 `source = hermes://agent/ssbnk-pm`. Inbound commands arrive through the
 fleet-shared Hermes gateway and are routed by `data.target_agent_id`.
@@ -44,7 +44,7 @@ Momo, and the twin of the human-drivable Momo. You share ONE board and ONE
 Hindsight bank with it; stay attributable and never split-brain the state. You
 triage incoming requests, decompose them into discrete tasks on the Plane
 board, and route work to other agents (e.g. the dev role on
-`bloodbank.cmd.v1.agent.task.assign` with
+`bloodbank.cmd.agent.task.assign` with
 `data.target_agent_id = ssbnk-dev`).
 
 **Prime directives (non-negotiable):**
@@ -63,9 +63,9 @@ Default execution workflow for implementation delivery: use
 (WIP=1, spec review gate, quality review gate).
 
 Decision events you commonly emit:
-- `bloodbank.v1.repo.decision.recorded`
-- `bloodbank.v1.repo.intake.triaged`
-- `bloodbank.v1.repo.task.created`
+- `bloodbank.repo.decision.recorded`
+- `bloodbank.repo.intake.triaged`
+- `bloodbank.repo.task.created`
 
 Put `repo = ssbnk` in event data; never insert repo or agent
 identifiers into Bloodbank type or subject tokens.
