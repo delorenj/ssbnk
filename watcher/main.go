@@ -212,10 +212,7 @@ func withHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Upload-Key, X-API-Key")
 
-		// Cache static assets
-		if isImageFile(r.URL.Path) {
-			w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
-		}
+		w.Header().Set("Cache-Control", cacheControlForPath(r.URL.Path))
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
@@ -224,6 +221,27 @@ func withHeaders(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func cacheControlForPath(path string) string {
+	switch {
+	case strings.HasPrefix(path, "/_astro/"):
+		// Astro fingerprints build assets, so different releases never share a URL.
+		return "public, max-age=31536000, immutable"
+	case isImageFile(path):
+		return "public, max-age=86400, immutable"
+	case strings.HasPrefix(path, "/api/"),
+		path == "/health",
+		path == "/upload",
+		path == "/latest" || strings.HasPrefix(path, "/latest/"),
+		path == "/hybrid" || strings.HasPrefix(path, "/hybrid/"),
+		path == "/stateless" || strings.HasPrefix(path, "/stateless/"):
+		return "no-store"
+	default:
+		// The HTML references fingerprinted assets from the current image. Force
+		// clients to revalidate it so cached markup cannot point at retired chunks.
+		return "no-cache"
+	}
 }
 
 // handleAPIScreenshots returns screenshot metadata as JSON for the UI

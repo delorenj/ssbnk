@@ -18,6 +18,7 @@ interface APIResponse {
 }
 
 const API_BASE = (import.meta.env.PUBLIC_API_URL || "").replace(/\/$/, "");
+const REQUEST_TIMEOUT_MS = 10_000;
 
 function formatSize(bytes: number): string {
   if (!bytes) return "";
@@ -41,20 +42,56 @@ export default function ScreenshotGallery() {
   const [total, setTotal] = useState(0);
   const [view, setView] = useState<string>("grid");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
+  const [reloadKey, setReloadKey] = useState(0);
   const limit = 48;
 
   useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(
+      () => controller.abort(),
+      REQUEST_TIMEOUT_MS,
+    );
+
     setLoading(true);
-    fetch(`${API_BASE}/api/screenshots?limit=${limit}&offset=${offset}`)
-      .then((r) => r.json())
+    setError(null);
+    fetch(`${API_BASE}/api/screenshots?limit=${limit}&offset=${offset}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Gallery request failed with ${response.status}`);
+        }
+        return response.json();
+      })
       .then((data: APIResponse) => {
+        if (!active) return;
         setScreenshots(data.screenshots || []);
         setTotal(data.total);
       })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [offset]);
+      .catch((requestError: unknown) => {
+        if (!active) return;
+        console.error(requestError);
+        setError(
+          controller.signal.aborted
+            ? "The gallery request timed out."
+            : "The gallery could not be loaded.",
+        );
+      })
+      .finally(() => {
+        window.clearTimeout(timeout);
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [offset, reloadKey]);
 
   const hasMore = offset + limit < total;
 
@@ -82,8 +119,25 @@ export default function ScreenshotGallery() {
       </header>
 
       {loading ? (
-        <div className="flex justify-center py-20 text-muted-foreground">
+        <div
+          aria-live="polite"
+          className="flex justify-center py-20 text-muted-foreground"
+        >
           Loading...
+        </div>
+      ) : error ? (
+        <div
+          role="alert"
+          className="flex flex-col items-center gap-4 py-20 text-center"
+        >
+          <p className="text-sm text-muted-foreground">{error}</p>
+          <button
+            type="button"
+            onClick={() => setReloadKey((key) => key + 1)}
+            className="rounded-md border px-4 py-2 text-sm transition-colors hover:bg-muted"
+          >
+            Retry
+          </button>
         </div>
       ) : view === "grid" ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">

@@ -2,10 +2,43 @@ package main
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestWithHeadersSetsCachePolicy(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "html shell", path: "/", want: "no-cache"},
+		{name: "client route", path: "/gallery", want: "no-cache"},
+		{name: "fingerprinted asset", path: "/_astro/gallery.abc123.js", want: "public, max-age=31536000, immutable"},
+		{name: "gallery api", path: "/api/screenshots", want: "no-store"},
+		{name: "health", path: "/health", want: "no-store"},
+		{name: "latest redirect", path: "/latest/2", want: "no-store"},
+		{name: "hosted image", path: "/capture.png", want: "public, max-age=86400, immutable"},
+	}
+
+	handler := withHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, tt.path, nil))
+
+			if got := recorder.Header().Get("Cache-Control"); got != tt.want {
+				t.Fatalf("Cache-Control = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestGIFScreenshotPreservesGIFContentAndExtension(t *testing.T) {
 	root := t.TempDir()
