@@ -45,6 +45,11 @@ if ! REPO_ROOT="$(git -C "$ROLE_DIR" rev-parse --show-toplevel 2>/dev/null)"; th
 fi
 export TERMINAL_CWD="$REPO_ROOT"
 
+# Do not forward a stale/raw channel value inherited from the service manager,
+# login shell, or a legacy runtime EnvironmentFile. Hermes hydrates the named
+# profile's validated 1Password references after this launcher execs it.
+unset TELEGRAM_BOT_TOKEN SLACK_BOT_TOKEN SLACK_APP_TOKEN
+
 load_credential() {
   local credential_id="$1" env_name="$2" credential_file value
   [[ "$env_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
@@ -57,7 +62,6 @@ load_credential() {
   unset value
 }
 
-load_credential telegram_bot_token TELEGRAM_BOT_TOKEN
 MODEL_KEY_ENV="$(yaml_get model.key_env)"
 if [[ -n "$MODEL_KEY_ENV" ]]; then
   load_credential model_api_key "$MODEL_KEY_ENV"

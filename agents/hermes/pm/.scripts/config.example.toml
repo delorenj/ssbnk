@@ -35,9 +35,15 @@ oauth_file = "~/.hermes/auth.json"
 codex_home = "~/.codex"
 # Canonical external skills dir mirrored into each agent profile.
 canonical_skills_dir = "/home/delorenj/.agents/skills"
-# Voxxy plugin + service defaults for Hermes PM agents.
-voxxy_plugin_dir = "~/code/voxxy/plugins/tts/voxxy"
+# Optional Vox plugin + service defaults for Hermes PM agents.
+vox_plugin_name = "vox"
+vox_plugin_dir = "~/code/voxxy/plugins/tts/vox"
+vox_voice = "carlin"
 vox_url = "https://vox.delo.sh"
+# Channel credentials are written directly to Password items in this vault;
+# only op:// references are recorded in named-profile config.delta.yaml.
+onepassword_vault = "DeLoSecrets"
+onepassword_item_prefix = "hermes-agent"
 # Canonical PM config.yaml the provisioner seeds each runtime's config.yaml from.
 # This is the fleet-wide Hermes inference/skill config (model, toolsets, etc.)
 # every agent runtime starts from. ~ is expanded.

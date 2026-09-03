@@ -17,6 +17,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 import tomllib
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -591,30 +592,92 @@ def sync_registry(registry_url):
     return cache_dir
 
 
+def fetch_ttl_minutes():
+    """How long a git cache may go unfetched. 0 disables the guard entirely.
+
+    Both surfaces that call `sync_git_skill` run from a `mise enter` hook, which
+    fires on EVERY `cd` — so an unguarded `git pull` puts a network round-trip in
+    front of every directory change (~0.7s each, twice per enter, forever). The
+    ref a pack resolves to does not change nearly that often.
+
+    An unparseable or negative value falls back to the default rather than to 0:
+    a typo in an env var must not silently turn the guard off.
+    """
+    raw = os.environ.get("PJ_PACK_TTL_MINUTES", "").strip()
+    if not raw:
+        return 60
+    try:
+        value = int(raw)
+    except ValueError:
+        print(
+            f"Warning: PJ_PACK_TTL_MINUTES={raw!r} is not an integer; using 60",
+            file=sys.stderr,
+        )
+        return 60
+    return value if value >= 0 else 60
+
+
+def fetch_is_due(stamp, ttl_minutes):
+    """True when the cache at `stamp` is older than the TTL (or never stamped)."""
+    if ttl_minutes == 0:
+        return True
+    try:
+        age_seconds = time.time() - stamp.stat().st_mtime
+    except OSError:
+        return True
+    return age_seconds >= ttl_minutes * 60
+
+
 def sync_git_skill(name, source, version, cache_dir):
     target_dir = cache_dir / name
+    # Sibling of the clone, not inside it: a stamp within the working tree would
+    # show up as an untracked file in the very repo being pulled.
+    stamp = cache_dir / f".{name}.last-fetch"
+    ttl = fetch_ttl_minutes()
+
     if target_dir.exists():
-        # Just pull if it exists
-        try:
-            print(f"Updating git skill {name} in cache...")
-            subprocess.run(
-                ["git", "-C", str(target_dir), "pull"],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as error:
-            print(
-                f"Warning: Failed to update {name}: {error.stderr.decode()}",
-                file=sys.stderr,
-            )
+        if fetch_is_due(stamp, ttl):
+            try:
+                print(f"Updating git skill {name} in cache...")
+                subprocess.run(
+                    ["git", "-C", str(target_dir), "pull"],
+                    check=True,
+                    capture_output=True,
+                )
+                stamp.parent.mkdir(parents=True, exist_ok=True)
+                stamp.touch()
+            except subprocess.CalledProcessError as error:
+                print(
+                    f"Warning: Failed to update {name}: {error.stderr.decode()}",
+                    file=sys.stderr,
+                )
     else:
         print(f"Cloning git skill {name} to cache...")
         subprocess.run(["git", "clone", source, str(target_dir)], check=True)
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.touch()
 
     if version:
-        subprocess.run(
-            ["git", "-C", str(target_dir), "checkout", version], check=True
+        # A pin the cache has never seen is the one case the TTL gets wrong: the
+        # ref may have been pushed since the last fetch. Retry ONCE behind a
+        # forced fetch rather than failing, so changing a `version` in the
+        # manifest takes effect immediately instead of up to `ttl` minutes later.
+        checkout = subprocess.run(
+            ["git", "-C", str(target_dir), "checkout", version],
+            capture_output=True,
         )
+        if checkout.returncode != 0:
+            print(f"Pinned ref {version} not in cache for {name}; fetching...")
+            subprocess.run(
+                ["git", "-C", str(target_dir), "fetch", "--tags", "--prune"],
+                check=True,
+                capture_output=True,
+            )
+            stamp.parent.mkdir(parents=True, exist_ok=True)
+            stamp.touch()
+            subprocess.run(
+                ["git", "-C", str(target_dir), "checkout", version], check=True
+            )
 
     return target_dir
 

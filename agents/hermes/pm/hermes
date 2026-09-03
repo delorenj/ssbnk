@@ -42,7 +42,7 @@ if ! REPO_ROOT="$(git -C "$ROLE_DIR" rev-parse --show-toplevel 2>/dev/null)"; th
 fi
 
 # Never pass an identity-bearing chat credential from shared fleet state into
-# a profile process. Hermes loads the profile's own runtime/.env itself.
+# a profile process. Hermes resolves the named profile's 1Password references.
 unset TELEGRAM_BOT_TOKEN SLACK_BOT_TOKEN SLACK_APP_TOKEN
 
 CONFIG="${HERMES_TEMPLATE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/hermes-agent-template/config.toml}"

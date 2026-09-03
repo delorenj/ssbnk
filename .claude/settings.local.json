@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(git reset:*)",
+      "Bash(git commit:*)",
+      "Bash(mise mount:*)",
+      "Bash(docker volume inspect:*)"
+    ],
+    "deny": []
+  }
+}

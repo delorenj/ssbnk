@@ -6,6 +6,20 @@
 # or be silently reused by a profile. The non-secret allow-list may be shared.
 INVOCATION_TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN-}"
 INVOCATION_TELEGRAM_ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS-}"
+# Invocation credentials may have arrived as exported variables.  Remove them
+# before even resolving/sourcing _lib.sh: that path invokes utilities and loads
+# fleet state, and no child involved in setup should inherit a raw token.
+unset TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USERS
+
+# Every channel write lands in the host-global profile root that 10-hermes-profile.sh
+# creates. When that step is deferred the root does not exist yet, so there is no
+# honest Telegram state to record -- not even the disabled state, which is itself a
+# write into the profile. Defer with it. This guard must precede _lib.sh because that
+# library creates the role log and reads fleet configuration.
+if [[ "${SKIP_HOST_STATE:-0}" == "1" ]]; then
+  printf '%s\n' '[30] telegram — DEFERRED (SKIP_HOST_STATE=1)' >&2
+  exit 0
+fi
 
 # shellcheck source=_lib.sh
 source "$(dirname "$0")/_lib.sh"
@@ -19,59 +33,120 @@ else
 fi
 unset INVOCATION_TELEGRAM_BOT_TOKEN INVOCATION_TELEGRAM_ALLOWED_USERS
 
-telegram_yaml_update() {
-  python3 - "$ROLE_YAML" "$@" <<'PYEOF'
-import json
-import pathlib
-import re
-import sys
+PROFILE_HOME="$HOME/.hermes/profiles/$PROFILE_NAME"
+profile_root_require_real "$PROFILE_HOME"
+RUNTIME="$ROLE_DIR/runtime"
+ENVF="$RUNTIME/.env"
+mkdir -p "$RUNTIME"
+[[ ! -L "$ENVF" ]] || die "refusing to write Telegram credentials through symlink: $ENVF"
 
-path = pathlib.Path(sys.argv[1])
-updates = dict(zip(sys.argv[2::2], sys.argv[3::2]))
-text = path.read_text(encoding="utf-8")
-match = re.search(r"(?ms)^telegram:\s*\n(?P<body>(?:^[ \t]+.*\n?)*)", text)
-if not match:
-    raise SystemExit(f"telegram metadata block missing from {path}")
-body = match.group("body")
-for key, value in updates.items():
-    replacement = f"  {key}: {json.dumps(value)}"
-    body, count = re.subn(
-        rf"(?m)^\s+{re.escape(key)}:\s*.*$", lambda _: replacement, body, count=1
-    )
-    if count == 0:
-        if body and not body.endswith("\n"):
-            body += "\n"
-        body += replacement + "\n"
-path.write_text(text[: match.start("body")] + body + text[match.end("body") :], encoding="utf-8")
-PYEOF
+telegram_reconcile_existing() {
+  # Registry first, then the transaction helper's profile lock. The helper
+  # snapshots and validates refs plus role metadata only inside this window.
+  local rc=0
+  fleet_lock_acquire
+  trap 'fleet_lock_release' EXIT
+  channel_transaction_telegram_existing "$PROFILE_HOME" "$ENVF" || rc=$?
+  fleet_lock_release
+  trap - EXIT
+  return "$rc"
 }
 
-telegram_status="$(yaml_get telegram.provisioning_status)"
+telegram_defer_if_unconfigured() {
+  # Prepare and, when already verified, reconcile under one registry-lock
+  # window. The helpers independently take the profile lock second.
+  local prepare_rc=0 rc=0
+  fleet_lock_acquire
+  trap 'fleet_lock_release' EXIT
+  channel_transaction_telegram_prepare_unconfigured \
+    "$PROFILE_HOME" "$ENVF" || prepare_rc=$?
+  case "$prepare_rc" in
+    0)
+      fleet_lock_release
+      trap - EXIT
+      return 2
+      ;;
+    3)
+      channel_transaction_telegram_existing "$PROFILE_HOME" "$ENVF" || rc=$?
+      ;;
+    *)
+      die "Telegram deferred-state preparation transaction failed"
+      ;;
+  esac
+  case "$rc" in
+    0)
+      fleet_lock_release
+      trap - EXIT
+      return 0
+      ;;
+    75)
+      die "Telegram 1Password reference validation is temporarily unavailable; preserved existing verified wiring for retry"
+      ;;
+    *)
+      die "Telegram verified wiring reconciliation transaction failed"
+      ;;
+  esac
+}
+
+telegram_prepare_for_attempt() {
+  # A new profile becomes explicitly disabled before remote verification. A
+  # verified profile is a no-op so a failed rotation preserves active wiring.
+  local rc=0
+  fleet_lock_acquire
+  trap 'fleet_lock_release' EXIT
+  channel_transaction_telegram_prepare_unconfigured \
+    "$PROFILE_HOME" "$ENVF" || rc=$?
+  fleet_lock_release
+  trap - EXIT
+  case "$rc" in
+    0|3) return 0 ;;
+    *) die "Telegram deferred-state preparation transaction failed" ;;
+  esac
+}
+
+# A valid durable mapping survives a transient 1Password outage. If the caller
+# supplied no rotation value, adopt/revalidate the complete current wiring
+# under registry -> profile locks. No ref or identity snapshot escapes that
+# window.
+if [[ -z "${TELEGRAM_BOT_TOKEN:-}" ]]; then
+  telegram_reference_rc=0
+  telegram_reconcile_existing || telegram_reference_rc=$?
+  case "$telegram_reference_rc" in
+    0)
+      log "[30] telegram — existing verified 1Password wiring reconciled"
+      exit 0
+      ;;
+    2) ;;
+    75)
+      die "Telegram 1Password reference validation is temporarily unavailable; preserved existing verified wiring for retry"
+      ;;
+    *)
+      die "Telegram verified wiring reconciliation transaction failed"
+      ;;
+  esac
+fi
+
+# Establish explicit disabled state for a first-time credential attempt. This
+# recheck is serialized with rotations: existing verified wiring is preserved,
+# while an unconfigured profile is disabled before any fallible remote check.
+if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
+  telegram_prepare_for_attempt
+fi
 
 if [[ "${SKIP_TELEGRAM:-0}" == "1" ]]; then
-  if [[ "$telegram_status" == "verified" ]] && already_done 30-telegram; then
-    log "[30] telegram — SKIPPED; existing verified wiring preserved"
+  telegram_defer_rc=0
+  telegram_defer_if_unconfigured || telegram_defer_rc=$?
+  if [[ $telegram_defer_rc -eq 2 ]]; then
+    log "[30] telegram — DEFERRED (SKIP_TELEGRAM=1; no verified 1Password reference)"
   else
-    telegram_yaml_update provisioning_status disabled
-    clear_done 30-telegram
-    log "[30] telegram — DEFERRED (SKIP_TELEGRAM=1; completion marker cleared)"
+    log "[30] telegram — existing verified 1Password wiring reconciled"
   fi
   exit 0
 fi
 
 if already_done 30-telegram; then
-  if [[ "$telegram_status" == "verified" ]]; then
-    log "[30] telegram already wired — skipping"
-    exit 0
-  fi
-  clear_done 30-telegram
-  log "[30] stale deferred completion marker cleared — reconciling Telegram"
+  log "[30] existing completion marker preserved while Telegram is reconciled"
 fi
-
-RUNTIME="$ROLE_DIR/runtime"
-ENVF="$RUNTIME/.env"
-mkdir -p "$RUNTIME"
-[[ ! -L "$ENVF" ]] || die "refusing to write Telegram credentials through symlink: $ENVF"
 
 cat >&2 <<EOF
 
@@ -93,19 +168,28 @@ if [[ -z "${TELEGRAM_BOT_TOKEN:-}" && -t 0 ]]; then
 fi
 
 if [[ -z "${TELEGRAM_BOT_TOKEN:-}" ]]; then
-  telegram_yaml_update provisioning_status deferred
-  clear_done 30-telegram
-  warn "    no token provided; Telegram step deferred"
-  warn "    re-run later with a profile-dedicated TELEGRAM_BOT_TOKEN invocation"
+  telegram_defer_rc=0
+  telegram_defer_if_unconfigured || telegram_defer_rc=$?
+  if [[ $telegram_defer_rc -eq 2 ]]; then
+    warn "    no token provided; Telegram step deferred"
+    warn "    re-run later with a profile-dedicated TELEGRAM_BOT_TOKEN invocation"
+  else
+    log "[30] telegram — existing verified 1Password wiring reconciled"
+  fi
   exit 0
 fi
 
 # Sanity check
-if [[ ! "$TELEGRAM_BOT_TOKEN" =~ ^[0-9]+:.+ ]]; then
+if [[ ! "$TELEGRAM_BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
   die "token doesn't look like a Telegram bot token"
 fi
 log "    verifying token..."
-info=$(curl -fsS "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe") \
+# Keep the credential out of process argv and environment. curl reads its
+# complete request description from an anonymous stdin pipe.
+info="$({
+  printf 'url = "https://api.telegram.org/bot%s/getMe"\n' "$TELEGRAM_BOT_TOKEN"
+  printf '%s\n' 'fail' 'silent' 'show-error'
+} | curl --config -)" \
   || die "Telegram getMe request failed"
 identity=$(printf '%s' "$info" | python3 -c '
 import json, sys
@@ -138,17 +222,15 @@ fi
 # Reject token reuse, token rotation onto an identity owned by another agent,
 # and credentials parked in shared fleet/root env files. The scan, durable
 # identity claim, and profile credential write share one fleet-wide flock.
-export TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USERS
 fleet_lock_acquire
 trap 'fleet_lock_release' EXIT
-python3 - "$REGISTRY_FILE" "$FLEET_ENV" "$ENVF" "$AGENT_ID" "$bot_id" \
-  "$ROLE_DIR" "$PROFILE_NAME" "$bot_username" <<'PYEOF'
-import errno
+python3 /dev/fd/3 "$REGISTRY_FILE" "$FLEET_ENV" "$ENVF" "$AGENT_ID" "$bot_id" \
+  "$ROLE_DIR" "$PROFILE_NAME" "$bot_username" \
+  3<<'PYEOF' <<<"$TELEGRAM_BOT_TOKEN"
 import os
 import pathlib
 import re
 import sys
-import tempfile
 try:
     import yaml  # type: ignore
 except ImportError:
@@ -164,7 +246,14 @@ except ImportError:
     profile_name,
     bot_username,
 ) = sys.argv[1:]
-token = os.environ["TELEGRAM_BOT_TOKEN"]
+token = sys.stdin.read()
+if token.endswith("\n"):
+    token = token[:-1]
+if not token:
+    raise SystemExit("Telegram ownership scan received no credential")
+for metadata_path in (pathlib.Path("/proc/self/cmdline"), pathlib.Path("/proc/self/environ")):
+    if metadata_path.is_file() and token.encode() in metadata_path.read_bytes():
+        raise SystemExit("Telegram ownership scan detected credential exposure in process metadata")
 target = pathlib.Path(target_path).resolve(strict=False)
 
 def env_token(path):
@@ -223,130 +312,52 @@ for owner, path in owners:
     if env_token(path) == token:
         raise SystemExit(f"Telegram bot token is already assigned to {owner}")
 
-claim = agents.setdefault(agent_id, {})
-if not isinstance(claim, dict):
-    raise SystemExit(f"registry entry for {agent_id} is not a mapping")
-claim["role_dir"] = role_dir
-claim["profile_name"] = profile_name
-claim["telegram"] = {
-    "provisioning_status": "verified",
-    "bot_username": bot_username,
-    "bot_id": bot_id,
-}
-registry.parent.mkdir(parents=True, exist_ok=True)
-rendered = yaml.safe_dump(data, sort_keys=False)
-
-def fsync_parent(target):
-    unsupported = {errno.EINVAL, getattr(errno, "ENOTSUP", errno.EINVAL), errno.ENOSYS}
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    try:
-        directory_fd = os.open(target.parent, flags)
-    except OSError as exc:
-        if exc.errno in unsupported:
-            return
-        raise
-    try:
-        try:
-            os.fsync(directory_fd)
-        except OSError as exc:
-            if exc.errno not in unsupported:
-                raise
-    finally:
-        os.close(directory_fd)
-
-fd, temporary = tempfile.mkstemp(prefix=f".{registry.name}.telegram-", dir=registry.parent)
-try:
-    os.fchmod(fd, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(rendered)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, registry)
-    os.chmod(registry, 0o600)
-    fsync_parent(registry)
-except BaseException:
-    try:
-        os.unlink(temporary)
-    except FileNotFoundError:
-        pass
-    raise
+# This phase is intentionally read-only. The later channel transaction repeats
+# identity-conflict validation under the same lock before committing registry
+# metadata, so a failed vault stage cannot leave a false ownership claim.
 PYEOF
 
-# Atomically replace only Telegram fields in the profile-local runtime file.
-export TELEGRAM_ALLOWED_USERS
-python3 - "$ENVF" <<'PYEOF'
-import errno
-import json
-import os
-import pathlib
-import re
-import sys
-import tempfile
-
-path = pathlib.Path(sys.argv[1])
-if path.is_symlink():
-    raise SystemExit(f"refusing to write Telegram credentials through symlink: {path}")
-path.parent.mkdir(parents=True, exist_ok=True)
-text = path.read_text(encoding="utf-8") if path.exists() else ""
-for key in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS"):
-    text = re.sub(rf"(?m)^\s*(?:export\s+)?#?\s*{key}\s*=.*(?:\n|$)", "", text)
-text = text.rstrip("\n")
-if text:
-    text += "\n"
-text += "".join(
-    f"{key}={json.dumps(os.environ.get(key, ''))}\n"
-    for key in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS")
-)
-
-def fsync_parent(target):
-    unsupported = {errno.EINVAL, getattr(errno, "ENOTSUP", errno.EINVAL), errno.ENOSYS}
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    try:
-        directory_fd = os.open(target.parent, flags)
-    except OSError as exc:
-        if exc.errno in unsupported:
-            return
-        raise
-    try:
-        try:
-            os.fsync(directory_fd)
-        except OSError as exc:
-            if exc.errno not in unsupported:
-                raise
-    finally:
-        os.close(directory_fd)
-
-fd, temporary = tempfile.mkstemp(prefix=".env.telegram-", dir=path.parent)
-try:
-    os.fchmod(fd, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(text)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, path)
-    os.chmod(path, 0o600)
-    fsync_parent(path)
-except BaseException:
-    try:
-        os.unlink(temporary)
-    except FileNotFoundError:
-        pass
-    raise
-PYEOF
+# Stage the credential in a new immutable 1Password item. The helper verifies
+# the staged field and returns the immutable item id plus reference; no local
+# ownership/config state has changed yet.
+ONEPASSWORD_ITEM_PREFIX="${HERMES_ONEPASSWORD_ITEM_PREFIX:-$(config_get fleet.onepassword_item_prefix 'hermes-agent')}"
+telegram_stage="$(stage_onepassword_secret \
+  "${ONEPASSWORD_ITEM_PREFIX}-${AGENT_ID}-telegram-bot-token" \
+  telegram_bot_token "$TELEGRAM_BOT_TOKEN")" \
+  || die "Telegram credential could not be staged and verified in 1Password"
+if [[ "$telegram_stage" != *$'\n'* ]]; then
+  die "Telegram credential staging returned an invalid result"
+fi
+telegram_staged_item_id="${telegram_stage%%$'\n'*}"
+telegram_reference="${telegram_stage#*$'\n'}"
+[[ "$telegram_reference" != *$'\n'* ]] \
+  || die "Telegram credential staging returned too many references"
 unset TELEGRAM_BOT_TOKEN
 
-# Record the verified identity, never the token.
-telegram_yaml_update \
-  provisioning_status verified \
-  bot_username "$bot_username" \
-  bot_id "$bot_id"
+# From here until commit, any failure archives the staged item by immutable id
+# and releases the fleet lock. The transaction itself keeps the platform
+# disabled while committing refs, role metadata, runtime policy, and registry;
+# activation and the done marker are its final writes.
+telegram_transaction_exit() {
+  local rc=$?
+  trap - EXIT
+  if [[ -n "${telegram_staged_item_id:-}" ]]; then
+    delete_staged_onepassword_item "$telegram_staged_item_id" >/dev/null 2>&1 \
+      || warn "    staged Telegram item cleanup failed; archive manually by immutable item id"
+  fi
+  fleet_lock_release
+  exit "$rc"
+}
+trap telegram_transaction_exit EXIT
+
+channel_transaction_telegram \
+  "$PROFILE_HOME" "$ENVF" "$telegram_reference" \
+  "$bot_username" "$bot_id" "${TELEGRAM_ALLOWED_USERS:-}" \
+  || die "Telegram local credential transaction failed"
+
+telegram_staged_item_id=""
 
 fleet_lock_release
 trap - EXIT
 
-# Enable telegram toolset for the profile
-env HERMES_HOME="$RUNTIME" "$HERMES_BIN" tools enable telegram hermes-telegram 2>/dev/null \
-  || warn "    couldn't auto-enable telegram toolset; run: $ROLE_DIR/hermes tools"
-
-log "    wired @$bot_username (id=$bot_id)"
-mark_done 30-telegram
+log "    wired @$bot_username (id=$bot_id) through 1Password reference"

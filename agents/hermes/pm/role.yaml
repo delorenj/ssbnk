@@ -96,3 +96,6 @@ provisioned_by: hermes-agent-template
 deployment:
   local_only: false
   systemd: required
+service_state:
+  heartbeat: active
+  gateway: active

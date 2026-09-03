@@ -40,8 +40,10 @@ python3 - "$REGISTRY_FILE" "$AGENT_ID" "$REPO" "$ROLE" "$DISPLAY_NAME" \
   "$PLANE_WORKSPACE" "$PLANE_PROJECT_ID" "$(yaml_get plane.identifier)" \
   "$RUNTIME_REPO" "$HERMES_BIN" "$HERMES_AGENT_REPO" "$HERMES_RUNTIME_GIT_URL" \
   "$HERMES_RUNTIME_GIT_REF" "$HERMES_RUNTIME_GIT_SHA" "$FLEET_ENV" \
-  "hermes-${AGENT_ID}-gateway.service" "hermes-${AGENT_ID}-heartbeat.timer" <<'PYEOF'
+  "hermes-${AGENT_ID}-gateway.service" "hermes-${AGENT_ID}-heartbeat.timer" \
+  "$(yaml_get service_state.gateway)" "$(yaml_get service_state.heartbeat)" <<'PYEOF'
 import datetime
+import copy
 import errno
 import os
 import pathlib
@@ -56,11 +58,17 @@ except ImportError:
  slack_status, slack_team_id, slack_team_name, slack_user_id, slack_bot_id,
  slack_username, bloodbank_enabled, bloodbank_scope, bloodbank_target, plane_ws, plane_id,
  plane_ident, runtime_repo, hermes_bin, hermes_repo, hermes_git_url,
- hermes_git_ref, hermes_git_sha, fleet_env, gw, heartbeat) = sys.argv[1:33]
+ hermes_git_ref, hermes_git_sha, fleet_env, gw, heartbeat,
+ gateway_state, heartbeat_state) = sys.argv[1:35]
 p = pathlib.Path(path)
 if p.is_symlink():
     raise SystemExit(f"refusing to update registry symlink: {p}")
-data = yaml.safe_load(p.read_text()) or {"schema_version": 1, "agents": {}}
+data = yaml.safe_load(p.read_text(encoding="utf-8")) or {"schema_version": 1, "agents": {}}
+if not isinstance(data, dict):
+    raise SystemExit("fleet registry root must be a mapping")
+agents = data.setdefault("agents", {})
+if not isinstance(agents, dict):
+    raise SystemExit("fleet registry agents must be a mapping")
 if bloodbank_enabled == "":
     bloodbank_enabled_value = False
 elif bloodbank_enabled == "true":
@@ -69,7 +77,13 @@ elif bloodbank_enabled == "false":
     bloodbank_enabled_value = False
 else:
     raise SystemExit("bloodbank.enabled must be the strict YAML boolean true or false")
-data.setdefault("agents", {})[agent_id] = {
+existing = agents.get(agent_id, {})
+if not isinstance(existing, dict):
+    raise SystemExit(f"fleet registry entry for {agent_id} must be a mapping")
+provisioned_at = existing.get("provisioned_at")
+if not isinstance(provisioned_at, str) or not provisioned_at:
+    provisioned_at = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+managed = {
   "repo": repo, "role": role, "display_name": display,
   "project_path": project, "role_dir": role_dir,
   "profile_name": profile,
@@ -101,9 +115,31 @@ data.setdefault("agents", {})[agent_id] = {
     "git_sha": hermes_git_sha,
     "fleet_env": fleet_env,
   },
-  "systemd": {"gateway_unit": gw, "heartbeat_timer": heartbeat},
-  "provisioned_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+  "systemd": {
+    "gateway_unit": gw,
+    "heartbeat_timer": heartbeat,
+    "gateway_state": gateway_state,
+    "heartbeat_state": heartbeat_state,
+  },
+  "provisioned_at": provisioned_at,
 }
+
+def merge_managed(current, update):
+    result = copy.deepcopy(current)
+    for key, value in update.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = merge_managed(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+entry = merge_managed(existing, managed)
+# This is retired managed schema, not extension metadata.  Keeping it would
+# falsely advertise a second per-agent Bloodbank execution path.
+systemd = entry.get("systemd")
+if isinstance(systemd, dict):
+    systemd.pop("consumer_unit", None)
+agents[agent_id] = entry
 rendered = yaml.safe_dump(data, sort_keys=False)
 p.parent.mkdir(parents=True, exist_ok=True)
 

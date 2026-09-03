@@ -31,7 +31,9 @@ current and machine-readable: `source`, `agent_id`, `repo`, `ticket_provider`,
 
 ## Source order (each pass)
 
-1. Active milestone (`tp active_milestone`) and issues (`tp list_issues`).
+1. Active milestone (`tp active_milestone`) and issues (`tp list_issues`). Plane's
+   issue list is project-wide: current-cycle visibility is exactly the rows with
+   `in_active_milestone:true`, not every returned issue.
 2. Local evidence under `_bmad-output/implementation-artifacts/issue-evidence/`.
 3. Live worker state: zellij sessions, worktrees, branches, recent git.
 

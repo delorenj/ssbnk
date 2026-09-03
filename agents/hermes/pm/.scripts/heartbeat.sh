@@ -145,9 +145,8 @@ else
 fi
 
 # Reconcile gate: the autonomous board-reconciliation pass runs only when
-# role.yaml's reconcile.enabled is true. Default off → the heartbeat just
-# checkpoints (behaves like the legacy hourly checkpoint timer). Flip
-# reconcile.enabled to opt a repo into autonomous board reconciliation.
+# role.yaml's reconcile.enabled is true. Deployed PMs default on; setting it
+# false explicitly opts into checkpoint-only operation.
 if [[ "$(reconcile_enabled)" != "true" ]]; then
   printf '[heartbeat] reconcile disabled (reconcile.enabled != true) — checkpoint-only tick\n'
   maybe_checkpoint
