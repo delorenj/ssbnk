@@ -54,6 +54,23 @@ func TestWatchedImageExtensionComesFromContent(t *testing.T) {
 	}
 }
 
+func TestFFmpegConversionArgsLimitsOutputToThirtySeconds(t *testing.T) {
+	args := ffmpegConversionArgs("recording.webm", "recording.gif", false)
+	for index, arg := range args {
+		if arg != "-t" {
+			continue
+		}
+		if index+1 >= len(args) {
+			t.Fatal("ffmpeg -t argument has no duration")
+		}
+		if args[index+1] != "30" {
+			t.Fatalf("ffmpeg duration = %q, want 30", args[index+1])
+		}
+		return
+	}
+	t.Fatal("ffmpeg arguments do not include a duration limit")
+}
+
 func TestWatchedImageMetadataFailureRollsBackAssetAndKeepsSource(t *testing.T) {
 	root := t.TempDir()
 	dataDir := filepath.Join(root, "data")

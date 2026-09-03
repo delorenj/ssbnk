@@ -45,9 +45,10 @@ type Config struct {
 }
 
 const (
-	maxUploadFileBytes = int64(50 << 20)
-	maxUploadBodyBytes = maxUploadFileBytes + int64(1<<20)
-	contentSniffBytes  = 512
+	maxUploadFileBytes    = int64(50 << 20)
+	maxUploadBodyBytes    = maxUploadFileBytes + int64(1<<20)
+	maxGIFDurationSeconds = 30
+	contentSniffBytes     = 512
 )
 
 func serve(config Config) error {
@@ -775,18 +776,22 @@ func processVideoWithConverter(
 }
 
 func runFFmpegConversion(sourcePath, destinationPath string, explicitMatroska bool) ([]byte, error) {
+	return exec.Command("ffmpeg", ffmpegConversionArgs(sourcePath, destinationPath, explicitMatroska)...).CombinedOutput()
+}
+
+func ffmpegConversionArgs(sourcePath, destinationPath string, explicitMatroska bool) []string {
 	args := []string{"-y"}
 	if explicitMatroska {
 		args = append(args, "-f", "matroska")
 	}
 	args = append(args,
 		"-i", sourcePath,
-		"-t", "10",
+		"-t", strconv.Itoa(maxGIFDurationSeconds),
 		"-vf", "fps=10,scale=640:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
 		"-loop", "0",
 		destinationPath,
 	)
-	return exec.Command("ffmpeg", args...).CombinedOutput()
+	return args
 }
 
 func validateGIF(path string) error {
