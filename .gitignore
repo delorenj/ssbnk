@@ -60,6 +60,11 @@ watcher/ssbnk-watcher
 watcher/main
 *.exe
 
+# Native macOS client build/package output
+/clients/macos/.build/
+/clients/macos/.swiftpm/
+/clients/macos/dist/
+
 # Binaries and compiled output (universal)
 *.o
 *.a

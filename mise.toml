@@ -74,7 +74,7 @@ run = "docker build --build-arg REVISION=$(git rev-parse HEAD) --build-arg VERSI
 
 [tasks.test]
 description = "Run all source and frontend checks"
-depends = ["test:go", "test:ui"]
+depends = ["test:go", "test:ui", "test:macos"]
 
 [tasks."test:go"]
 description = "Run Go race tests, vet, and reachable-vulnerability analysis"
@@ -83,6 +83,19 @@ run = "cd watcher && go test -race ./... && go vet ./... && go run golang.org/x/
 [tasks."test:ui"]
 description = "Install and build the same-origin frontend"
 run = "cd ui && npm ci && npm audit --audit-level=high && npm run build && ! rg 'ss\\.delo\\.sh' dist"
+
+[tasks."test:macos"]
+description = "Run deterministic tests for the native macOS client"
+tools = { swift = "6.3.3" }
+run = "cd clients/macos && swift test"
+
+[tasks."build:macos"]
+description = "Build the native macOS menu-bar client for Apple Silicon"
+run = "cd clients/macos && swift build -c release --arch arm64"
+
+[tasks."package:macos"]
+description = "Test, Developer-ID sign, and assemble the native macOS client DMG"
+run = "clients/macos/scripts/build-dmg.sh"
 
 [tasks."dev:init"]
 description = "Create disposable local bind-mount directories"
