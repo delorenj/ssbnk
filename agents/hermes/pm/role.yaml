@@ -51,10 +51,11 @@ ticket_provider:
   workspace: "33god"
   project: "ce150fc4-bfd9-4b6f-9f14-6468c18616e3"
   # Optional normalized-state name overrides for non-standard boards.
-  in_review: "" # e.g. "In Review"
-  completed: "" # e.g. "Done"
+  in_review: "E2E Testing & QA"
+  completed: "Done"
   cancelled: "" # e.g. "Cancelled"
-
+  started: "In Progress"
+  unstarted: "Todo"
 # Board-reconciliation knobs for the heartbeat sentinel pass.
 reconcile:
   enabled: false # heartbeat runs the autonomous board-reconciliation pass ONLY when true; default off = checkpoint-only
