@@ -50,12 +50,15 @@ ticket_provider:
     8616e3/issues/"
   workspace: "33god"
   project: "ce150fc4-bfd9-4b6f-9f14-6468c18616e3"
-  # Optional normalized-state name overrides for non-standard boards.
+  # Normalized-state -> Plane lane names. REQUIRED, not optional: the
+  # adapter refuses to guess when a Plane state group holds more than one
+  # lane, so every band must be named or the transition fails.
+  backlog:   "Backlog"
+  unstarted: "Todo"
+  started:   "In Progress"
   in_review: "E2E Testing & QA"
   completed: "Done"
-  cancelled: "" # e.g. "Cancelled"
-  started: "In Progress"
-  unstarted: "Todo"
+  cancelled: "Cancelled"
 # Board-reconciliation knobs for the heartbeat sentinel pass.
 reconcile:
   enabled: false # heartbeat runs the autonomous board-reconciliation pass ONLY when true; default off = checkpoint-only
