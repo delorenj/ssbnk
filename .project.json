@@ -19,13 +19,6 @@
       "provisioning_state": "provisioned"
     }
   },
-  "automation": {
-    "reconcile": {
-      "enabled": false,
-      "grace_hours": 0,
-      "auto_review": true
-    }
-  },
   "status": "planned",
   "source_artifacts": [],
   "template": {
