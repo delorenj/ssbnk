@@ -82,4 +82,13 @@ MODEL_API_MODE="$(yaml_get model.api_mode)"
 [[ -z "$MODEL_API_MODE" ]] || gateway_args+=(--api-mode "$MODEL_API_MODE")
 [[ -z "$MODEL_KEY_ENV" ]] || gateway_args+=(--key-env "$MODEL_KEY_ENV")
 
+# Put the profile on argv. `hermes profile list` identifies a gateway by its
+# COMMAND LINE (gateway/status.py::_command_line_belongs_to_profile): a named
+# profile must carry -p/--profile there, and HERMES_HOME in the environment is
+# explicitly not enough. Without this the gateway runs fine but every status
+# surface reports it "stopped" -- silently, with nothing in any log.
+if [[ "${HERMES_HOME:-}" == */.hermes/profiles/* ]]; then
+  gateway_args=(-p "$(basename "$HERMES_HOME")" "${gateway_args[@]}")
+fi
+
 exec "$HERMES_BIN" "${gateway_args[@]}"
