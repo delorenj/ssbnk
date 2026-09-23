@@ -35,8 +35,7 @@ python3 - "$REGISTRY_FILE" "$AGENT_ID" "$REPO" "$ROLE" "$DISPLAY_NAME" \
   "$(yaml_get slack.provisioning_status)" "$(yaml_get slack.team_id)" \
   "$(yaml_get slack.team_name)" "$(yaml_get slack.bot_user_id)" \
   "$(yaml_get slack.bot_id)" "$(yaml_get slack.bot_username)" \
-  "$ROLE_YAML" "$(yaml_get bloodbank.gateway_scope)" \
-  "$(yaml_get bloodbank.target_agent_id)" \
+  "$ROLE_YAML" \
   "$PLANE_WORKSPACE" "$PLANE_PROJECT_ID" "$(yaml_get plane.identifier)" \
   "$HERMES_BIN" "$HERMES_AGENT_REPO" "$HERMES_RUNTIME_GIT_URL" \
   "$HERMES_RUNTIME_GIT_REF" "$HERMES_RUNTIME_GIT_SHA" "$FLEET_ENV" \
@@ -57,10 +56,10 @@ except ImportError:
 (path, agent_id, repo, role, display, project, role_dir, profile,
  telegram_status, bot, telegram_bot_id,
  slack_status, slack_team_id, slack_team_name, slack_user_id, slack_bot_id,
- slack_username, role_yaml, bloodbank_scope, bloodbank_target, plane_ws, plane_id,
+ slack_username, role_yaml, plane_ws, plane_id,
  plane_ident, hermes_bin, hermes_repo, hermes_git_url,
  hermes_git_ref, hermes_git_sha, fleet_env, gw, heartbeat,
- gateway_state, heartbeat_state) = sys.argv[1:34]
+ gateway_state, heartbeat_state) = sys.argv[1:32]
 p = pathlib.Path(path)
 if p.is_symlink():
     raise SystemExit(f"refusing to update registry symlink: {p}")
@@ -107,14 +106,22 @@ StrictRoleLoader.add_constructor(
 )
 
 
-def role_bloodbank_enabled(role_path):
-    """bloodbank.enabled, read by a YAML parser rather than a line scan.
+def role_bloodbank(role_path, agent):
+    """The role's Bloodbank block, read by a YAML parser rather than a line scan.
 
     The shell `yaml_get` once scanned past the end of the `bloodbank:` block,
     so an absent key read a later `reconcile.enabled: false` and quarantined
     the agent. A parser cannot do that: the key is either in this mapping or
-    it is not. No key means enabled; only an explicit `false` quarantines; any
-    other present value (a string, `yes`, null, "") is refused.
+    it is not.
+
+    Every field follows one rule: ABSENT means the canonical value, PRESENT
+    must be that value's strict form, anything else is refused.
+    - enabled: absent => true; `true`/`false` are themselves; any other present
+      value (a string, `yes`, null, "") is refused.
+    - gateway_scope: absent => "fleet", the only ingress there is. A role.yaml
+      with no bloodbank block used to project "" here, and the fleet gateway's
+      default-deny eligibility silently stopped routing to the agent.
+    - target_agent_id: absent => this agent's id; a different id is refused.
     """
     try:
         role_doc = yaml.load(pathlib.Path(role_path).read_text(encoding="utf-8"), Loader=StrictRoleLoader)
@@ -124,17 +131,25 @@ def role_bloodbank_enabled(role_path):
         raise SystemExit("role.yaml root must be a mapping")
     bloodbank = role_doc.get("bloodbank")
     if bloodbank is None:
-        return True
+        bloodbank = {}
     if not isinstance(bloodbank, dict):
         raise SystemExit("role.yaml bloodbank must be a mapping")
     if "enabled" not in bloodbank:
-        return True
-    if isinstance(bloodbank["enabled"], bool):
-        return bloodbank["enabled"]
-    raise SystemExit("bloodbank.enabled must be the strict YAML boolean true or false")
+        enabled = True
+    elif isinstance(bloodbank["enabled"], bool):
+        enabled = bloodbank["enabled"]
+    else:
+        raise SystemExit("bloodbank.enabled must be the strict YAML boolean true or false")
+    scope = bloodbank.get("gateway_scope", "fleet")
+    if scope != "fleet":
+        raise SystemExit("bloodbank.gateway_scope must be fleet: the fleet-shared gateway is the only Bloodbank ingress")
+    target = bloodbank.get("target_agent_id", agent)
+    if target != agent:
+        raise SystemExit(f"bloodbank.target_agent_id must be this agent's id {agent!r}")
+    return enabled, scope, target
 
 
-bloodbank_enabled_value = role_bloodbank_enabled(role_yaml)
+bloodbank_enabled_value, bloodbank_scope, bloodbank_target = role_bloodbank(role_yaml, agent_id)
 existing = agents.get(agent_id, {})
 if not isinstance(existing, dict):
     raise SystemExit(f"fleet registry entry for {agent_id} must be a mapping")
