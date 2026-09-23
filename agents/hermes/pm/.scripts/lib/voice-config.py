@@ -461,7 +461,7 @@ def paths(args: argparse.Namespace) -> tuple[pathlib.Path, pathlib.Path, pathlib
     profile = delta.parent
     if profile.is_symlink() or not profile.is_dir():
         raise ContractError(
-            f"profile root must be a real directory: {profile}; run the pjangler "
+            f"profile root must be a real directory: {profile}; run the flume "
             "Hermes runtime-singleton migration first"
         )
     require_regular(base)

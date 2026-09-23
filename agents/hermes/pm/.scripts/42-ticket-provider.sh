@@ -155,7 +155,11 @@ else:
     d = {}
 repo = os.environ.get("REPO", "")
 d.setdefault("project_name", repo)
-d.setdefault("project_slug", repo)
+project_id = d.get("project_id", d.get("project_slug", repo))
+if not isinstance(project_id, str) or not project_id.strip():
+    raise SystemExit(".project.json needs a non-blank project_id")
+d["project_id"] = project_id.strip().lower()
+d.pop("project_slug", None)
 if not d.get("repo_path"):
     d["repo_path"] = os.environ.get("REPO_ROOT", "")
 if set_provider == "1":

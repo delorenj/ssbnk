@@ -17,29 +17,122 @@ warn() { local msg="[$(date +%H:%M:%S)] $*"; printf '\033[33m%s\033[0m\n' "$msg"
 err()  { local msg="[$(date +%H:%M:%S)] $*"; printf '\033[31m%s\033[0m\n' "$msg" >&2; printf '%s\n' "$msg" >> "$PROV_LOG"; }
 die()  { err "$*"; exit 1; }
 
-# Read a single field from role.yaml. Requires python3 (no yaml dep).
+# Read a single scalar from role.yaml. Requires python3 (no yaml dep).
+#
+# yaml_get KEY[.SUBKEY[...]]   e.g.  yaml_get role,  yaml_get telegram.bot_username
+#
+# Every dotted segment is looked up ONLY inside the block its parent opens, at
+# that block's own indentation, and the lookup stops at the first line that
+# dedents back out of it. The walker this replaced searched the rest of the
+# FILE for the leaf once it had found the parent, so an absent
+# `bloodbank.enabled` read a later `reconcile.enabled: false` and 80-registry.sh
+# quarantined the agent; an absent `telegram.bot_id` read slack's; an absent
+# `model.name` read `ticket_provider.name`. It also kept trailing comments, so
+# `explicit_opt_out: true  # ...` never equalled "true" in 70-systemd.sh.
+#
+# Absent prints nothing. Quotes are removed and a trailing `# comment` is
+# dropped, so the printed text is the scalar itself. A duplicated key, or a
+# parent that is a scalar rather than a block mapping, is refused on stderr
+# with a nonzero exit instead of being guessed at.
 yaml_get() {
-  # yaml_get  KEY[.SUBKEY]    e.g.  yaml_get role,  yaml_get telegram.bot_username
   local key="$1"
   python3 - "$ROLE_YAML" "$key" <<'PYEOF'
-import sys, re, pathlib
-path, key = sys.argv[1:3]
-text = pathlib.Path(path).read_text()
-parts = key.split(".")
-# Trivial YAML walker — handles flat and one-level nested keys.
-indent = -1
-prefix = ""
-for part in parts[:-1]:
-    indent += 2
-    prefix += part + ":"
-    m = re.search(rf"(?m)^{re.escape(part)}:\s*$", text)
-    if not m:
-        sys.exit(0)
-    text = text[m.end():]
-key = parts[-1]
-m = re.search(rf'(?m)^\s*{re.escape(key)}:\s*"?([^"\n]*)"?\s*$', text)
-if m:
-    print(m.group(1).strip())
+import json, pathlib, re, sys
+
+path, dotted = sys.argv[1:3]
+try:
+    lines = pathlib.Path(path).read_text(encoding="utf-8").splitlines()
+except FileNotFoundError:
+    sys.exit(0)
+
+KEY = re.compile(r"""( *)([A-Za-z0-9_][A-Za-z0-9_.-]*|"[^"]*"|'[^']*'):(?:[ \t]+(.*?))?[ \t]*""")
+BLOCK_SCALAR = re.compile(r"[|>][+-]?[0-9]?(?:[ \t]+#.*)?")
+
+
+def plain(raw):
+    """One YAML scalar as text: quotes removed, a trailing comment dropped."""
+    raw = (raw or "").strip()
+    if not raw or raw.startswith("#"):
+        return ""
+    if raw[0] == '"':
+        m = re.fullmatch(r'"((?:[^"\\]|\\.)*)"(?:[ \t]+#.*)?', raw)
+        if not m:
+            return raw
+        try:
+            return json.loads(f'"{m.group(1)}"')
+        except ValueError:
+            return m.group(1)
+    if raw[0] == "'":
+        m = re.fullmatch(r"'((?:[^']|'')*)'(?:[ \t]+#.*)?", raw)
+        return m.group(1).replace("''", "'") if m else raw
+    return re.split(r"[ \t]+#", raw, maxsplit=1)[0].strip()
+
+
+def indent_of(line):
+    return len(line) - len(line.lstrip(" "))
+
+
+def meaningful(line):
+    text = line.strip()
+    return bool(text) and not text.startswith("#") and text not in ("---", "...")
+
+
+start, end, parent_indent = 0, len(lines), -1
+value = None
+parts = dotted.split(".")
+for depth, part in enumerate(parts):
+    child_indent, hits = None, []
+    for index in range(start, end):
+        line = lines[index]
+        if not meaningful(line):
+            continue
+        if indent_of(line) <= parent_indent:
+            end = index  # the enclosing block ends here; nothing after it is ours
+            break
+        if child_indent is None:
+            child_indent = indent_of(line)
+        if indent_of(line) != child_indent:
+            continue  # deeper nesting belongs to some other key
+        m = KEY.fullmatch(line)
+        if m and plain(m.group(2)) == part:
+            hits.append((index, m.group(3)))
+    if not hits:
+        sys.exit(0)  # absent: print nothing
+    if len(hits) > 1:
+        sys.exit(f"yaml_get: duplicate key {'.'.join(parts[:depth + 1])!r} in {path}")
+    index, raw = hits[0]
+    if depth < len(parts) - 1:
+        if plain(raw) != "":
+            sys.exit(f"yaml_get: {'.'.join(parts[:depth + 1])!r} is not a block mapping in {path}")
+        start, parent_indent = index + 1, child_indent
+        continue
+    raw = (raw or "").strip()
+    if raw[:1] in ("'", '"') and plain(raw) == raw:
+        # A quoted scalar that does not close on its own line continues onto
+        # the more-indented lines below it (PyYAML folds long URLs this way).
+        for line in lines[index + 1:end]:
+            if line.strip() and indent_of(line) <= child_indent:
+                break
+            if raw.endswith("\\") and raw[0] == '"':
+                raw = raw[:-1] + line.lstrip()
+            else:
+                raw = raw + " " + line.strip()
+            if plain(raw) != raw:
+                break
+    if BLOCK_SCALAR.fullmatch(raw):
+        body = []
+        for line in lines[index + 1:end]:
+            if line.strip() and indent_of(line) <= child_indent:
+                break
+            body.append(line)
+        while body and not body[-1].strip():
+            body.pop()
+        floor = min((indent_of(l) for l in body if l.strip()), default=0)
+        body = [l[floor:] for l in body]
+        value = ("\n" if raw[0] == "|" else " ").join(body)
+    else:
+        value = plain(raw)
+print(value if value is not None else "")
 PYEOF
 }
 
@@ -280,7 +373,7 @@ atexit.register(profile_lock.release)
 if profile.is_symlink():
     raise SystemExit(
         f"refusing symlinked profile root: {profile}; "
-        "run the pjangler Hermes runtime-singleton migration before provisioning channels"
+        "run 'flume remediate hermes.runtime-singleton' before provisioning channels"
     )
 if not profile.is_dir():
     raise SystemExit(f"required profile root is unavailable: {profile}")
@@ -456,7 +549,7 @@ profile_voice_contract_set() {
 profile_root_require_real() {
   # profile_root_require_real PROFILE_HOME
   [[ ! -L "$1" ]] \
-    || die "refusing symlinked profile root: $1; run the pjangler Hermes runtime-singleton migration before provisioning channels"
+    || die "refusing symlinked profile root: $1; run 'flume remediate hermes.runtime-singleton' before provisioning channels"
   [[ -d "$1" ]] || die "required profile root is unavailable: $1"
 }
 
@@ -797,7 +890,16 @@ unset TELEGRAM_BOT_TOKEN SLACK_BOT_TOKEN SLACK_APP_TOKEN
 # Tools we expect on the host
 HERMES_BIN="${HERMES_BIN:-${HERMES_FLEET_BIN:-$(config_get fleet.hermes_bin "$HOME/.local/share/hermes-agent/releases/0408fec7a153e6c32c064acd2b8053917f1525f1/.venv/bin/hermes")}}"
 HERMES_AGENT_REPO="${HERMES_AGENT_REPO:-${HERMES_FLEET_REPO:-$(config_get fleet.hermes_repo "$HOME/.local/share/hermes-agent/releases/0408fec7a153e6c32c064acd2b8053917f1525f1")}}"
-PJANGLER_BIN="${PJANGLER_BIN:-$(config_get fleet.pjangler_bin "pj")}"
+# Named-profile topology is owned by Flume (was PJangler).
+#
+# BOTH keys are read, newest first, and that is deliberate. A copy of
+# 20-runtime-repo.sh is baked into every provisioned role directory -- 74 of them
+# on this machine, against 25 rows in the registry, which is all fleet-sync
+# iterates. An older copy only knows `fleet.pjangler_bin`, so writing both keys
+# in the host config redirects every copy at once, with no sweep and no drift
+# window. FLUME_BIN/PJANGLER_BIN env vars still win over either.
+FLUME_BIN="${FLUME_BIN:-${PJANGLER_BIN:-$(config_get fleet.flume_bin "$(config_get fleet.pjangler_bin "flume")")}}"
+PJANGLER_BIN="$FLUME_BIN"
 HERMES_RUNTIME_GIT_URL="${HERMES_RUNTIME_GIT_URL:-$(config_get fleet.hermes_git_url 'https://github.com/delorenj/hermes-agent.git')}"
 HERMES_RUNTIME_GIT_REF="${HERMES_RUNTIME_GIT_REF:-$(config_get fleet.hermes_git_ref 'main')}"
 HERMES_RUNTIME_GIT_SHA="${HERMES_RUNTIME_GIT_SHA:-$(config_get fleet.hermes_git_sha '0408fec7a153e6c32c064acd2b8053917f1525f1')}"
@@ -872,7 +974,7 @@ if [[ "$SKIP_PLANE" != "1" ]]; then
   PLANE_API_KEY="${PLANE_API_KEY:-${PLANE_33GOD_API_KEY:-}}"
 fi
 
-export FLEET_ENV HERMES_BIN HERMES_AGENT_REPO PJANGLER_BIN HERMES_RUNTIME_GIT_URL \
+export FLEET_ENV HERMES_BIN HERMES_AGENT_REPO FLUME_BIN PJANGLER_BIN HERMES_RUNTIME_GIT_URL \
        HERMES_RUNTIME_GIT_REF HERMES_RUNTIME_GIT_SHA HERMES_OAUTH_FILE CODEX_HOME \
        RUNTIME_SCAFFOLD_DIR REGISTRY_FILE \
        BLOODBANK_NATS_HOST BLOODBANK_NATS_PORT BLOODBANK_COMPOSE_DIR \

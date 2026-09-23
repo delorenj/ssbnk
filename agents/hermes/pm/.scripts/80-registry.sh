@@ -35,10 +35,10 @@ python3 - "$REGISTRY_FILE" "$AGENT_ID" "$REPO" "$ROLE" "$DISPLAY_NAME" \
   "$(yaml_get slack.provisioning_status)" "$(yaml_get slack.team_id)" \
   "$(yaml_get slack.team_name)" "$(yaml_get slack.bot_user_id)" \
   "$(yaml_get slack.bot_id)" "$(yaml_get slack.bot_username)" \
-  "$(yaml_get bloodbank.enabled)" "$(yaml_get bloodbank.gateway_scope)" \
+  "$ROLE_YAML" "$(yaml_get bloodbank.gateway_scope)" \
   "$(yaml_get bloodbank.target_agent_id)" \
   "$PLANE_WORKSPACE" "$PLANE_PROJECT_ID" "$(yaml_get plane.identifier)" \
-  "$RUNTIME_REPO" "$HERMES_BIN" "$HERMES_AGENT_REPO" "$HERMES_RUNTIME_GIT_URL" \
+  "$HERMES_BIN" "$HERMES_AGENT_REPO" "$HERMES_RUNTIME_GIT_URL" \
   "$HERMES_RUNTIME_GIT_REF" "$HERMES_RUNTIME_GIT_SHA" "$FLEET_ENV" \
   "hermes-${AGENT_ID}-gateway.service" "hermes-${AGENT_ID}-heartbeat.timer" \
   "$(yaml_get service_state.gateway)" "$(yaml_get service_state.heartbeat)" <<'PYEOF'
@@ -47,6 +47,7 @@ import copy
 import errno
 import os
 import pathlib
+import re
 import sys
 import tempfile
 try:
@@ -56,10 +57,10 @@ except ImportError:
 (path, agent_id, repo, role, display, project, role_dir, profile,
  telegram_status, bot, telegram_bot_id,
  slack_status, slack_team_id, slack_team_name, slack_user_id, slack_bot_id,
- slack_username, bloodbank_enabled, bloodbank_scope, bloodbank_target, plane_ws, plane_id,
- plane_ident, runtime_repo, hermes_bin, hermes_repo, hermes_git_url,
+ slack_username, role_yaml, bloodbank_scope, bloodbank_target, plane_ws, plane_id,
+ plane_ident, hermes_bin, hermes_repo, hermes_git_url,
  hermes_git_ref, hermes_git_sha, fleet_env, gw, heartbeat,
- gateway_state, heartbeat_state) = sys.argv[1:35]
+ gateway_state, heartbeat_state) = sys.argv[1:34]
 p = pathlib.Path(path)
 if p.is_symlink():
     raise SystemExit(f"refusing to update registry symlink: {p}")
@@ -69,16 +70,71 @@ if not isinstance(data, dict):
 agents = data.setdefault("agents", {})
 if not isinstance(agents, dict):
     raise SystemExit("fleet registry agents must be a mapping")
-if bloodbank_enabled == "":
-    # No key means enabled: an absent bloodbank.enabled activates the agent.
-    # Only an explicit `false` quarantines it.
-    bloodbank_enabled_value = True
-elif bloodbank_enabled == "true":
-    bloodbank_enabled_value = True
-elif bloodbank_enabled == "false":
-    bloodbank_enabled_value = False
-else:
+
+
+class StrictRoleLoader(yaml.SafeLoader):
+    """YAML with only `true`/`false` as booleans and no duplicate keys.
+
+    PyYAML's YAML 1.1 resolver turns `yes`, `on` and `True` into booleans,
+    which would be activation-by-coercion; here they stay strings and are
+    refused. A duplicated key is refused too, because last-wins would let a
+    second `bloodbank:` block silently discard the first one's quarantine.
+    """
+
+
+StrictRoleLoader.yaml_implicit_resolvers = {
+    first: [(tag, rx) for tag, rx in resolvers if tag != "tag:yaml.org,2002:bool"]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+StrictRoleLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:bool", re.compile(r"^(?:true|false)$"), list("tf")
+)
+
+
+def construct_unique_mapping(loader, node, deep=False):
+    loader.flatten_mapping(node)
+    seen = set()
+    for key_node, _ in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in seen:
+            raise SystemExit(f"role.yaml has a duplicate key {key!r} ({key_node.start_mark})")
+        seen.add(key)
+    return loader.construct_mapping(node, deep=deep)
+
+
+StrictRoleLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_unique_mapping
+)
+
+
+def role_bloodbank_enabled(role_path):
+    """bloodbank.enabled, read by a YAML parser rather than a line scan.
+
+    The shell `yaml_get` once scanned past the end of the `bloodbank:` block,
+    so an absent key read a later `reconcile.enabled: false` and quarantined
+    the agent. A parser cannot do that: the key is either in this mapping or
+    it is not. No key means enabled; only an explicit `false` quarantines; any
+    other present value (a string, `yes`, null, "") is refused.
+    """
+    try:
+        role_doc = yaml.load(pathlib.Path(role_path).read_text(encoding="utf-8"), Loader=StrictRoleLoader)
+    except yaml.YAMLError as exc:
+        raise SystemExit(f"role.yaml is not valid YAML: {exc}")
+    if not isinstance(role_doc, dict):
+        raise SystemExit("role.yaml root must be a mapping")
+    bloodbank = role_doc.get("bloodbank")
+    if bloodbank is None:
+        return True
+    if not isinstance(bloodbank, dict):
+        raise SystemExit("role.yaml bloodbank must be a mapping")
+    if "enabled" not in bloodbank:
+        return True
+    if isinstance(bloodbank["enabled"], bool):
+        return bloodbank["enabled"]
     raise SystemExit("bloodbank.enabled must be the strict YAML boolean true or false")
+
+
+bloodbank_enabled_value = role_bloodbank_enabled(role_yaml)
 existing = agents.get(agent_id, {})
 if not isinstance(existing, dict):
     raise SystemExit(f"fleet registry entry for {agent_id} must be a mapping")
@@ -86,7 +142,10 @@ provisioned_at = existing.get("provisioned_at")
 if not isinstance(provisioned_at, str) or not provisioned_at:
     provisioned_at = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 managed = {
-  "repo": repo, "role": role, "display_name": display,
+  # The RUNTIME this row describes. Emitted on every provision so a re-provision
+  # can never drop the field back to an assumption: the registry states the
+  # runtime, it is not inferred from the fact that this template wrote the row.
+  "repo": repo, "role": role, "type": "hermes", "display_name": display,
   "project_path": project, "role_dir": role_dir,
   "profile_name": profile,
   "telegram": {
@@ -108,7 +167,9 @@ managed = {
     "target_agent_id": bloodbank_target,
   },
   "plane": {"workspace": plane_ws, "project_id": plane_id, "identifier": plane_ident},
-  "runtime_repo": runtime_repo,
+  # No `runtime_repo`. An agent runtime is host-local and may hold secrets and
+  # mutable state (PJAN-41); it is never a Git repository, never a submodule, and
+  # never pushed anywhere. Durability belongs to Hindsight.
   "hermes": {
     "bin": hermes_bin,
     "repo": hermes_repo,

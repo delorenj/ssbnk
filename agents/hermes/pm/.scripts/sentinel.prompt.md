@@ -32,9 +32,14 @@ on Linear, Plane, or Trello.
 
 ## Pass
 
-**Trigger.** This pass runs both on the cheap heartbeat timer AND on a live
-**Plane board event** — a `bloodbank.evt.repo.task.*` event (repo identity lives
-in `data.repo`, never in the subject) delivered by the `plane-webhook-bridge`. If a specific ticket event triggered you, FIRST
+**Trigger.** This pass runs both as a scheduled reconcile (`.scripts/heartbeat.sh`;
+the per-agent heartbeat timer is retired, so scheduling comes from Bloodbank) AND
+on a live **Plane board event** — a `bloodbank.evt.repo.task.*` fact (repo identity
+lives in `data.repo`, never in the subject; the Plane name survives only as
+`data.provider_event_type`, e.g. `plane.ticket.created`). The single normalizer
+that turns a Plane webhook into that fact is the n8n **Plane → Bloodbank**
+workflow (`n8n-nodes-bloodbank`, `src/plane.ts`); nothing else publishes ticket
+facts, and a PM never emits them itself. If a specific ticket event triggered you, FIRST
 `tp get_issue <that ticket>`, read the change, and react to it (triage / refine /
 comment / transition per the lifecycle) before the general reconcile below.
 

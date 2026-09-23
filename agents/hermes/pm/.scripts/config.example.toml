@@ -15,9 +15,12 @@
 hermes_bin = "~/.local/share/hermes-agent/releases/0408fec7a153e6c32c064acd2b8053917f1525f1/.venv/bin/hermes"
 # Checkout of the shared hermes-agent repo.
 hermes_repo = "~/.local/share/hermes-agent/releases/0408fec7a153e6c32c064acd2b8053917f1525f1"
-# Canonical CommonProject migration CLI. Runtime provisioning delegates named
-# profile topology to this command; it never rewrites profile links itself.
-pjangler_bin = "pj"
+# The workforce CLI. Runtime provisioning delegates named profile topology to
+# this command; it never rewrites profile links itself.
+flume_bin = "flume"
+# Deprecated alias for flume_bin, read only so that role directories rendered
+# before the split keep resolving. Set both to the same value.
+pjangler_bin = "flume"
 # Reviewed fleet runtime publication. Provisioning metadata and clean installs
 # must agree on this fork/ref/SHA; do not substitute upstream main.
 hermes_git_url = "https://github.com/delorenj/hermes-agent.git"
@@ -33,8 +36,8 @@ registry_file = "~/.hermes/agents-registry.yaml"
 # (including openai-codex); CODEX_HOME is for Codex CLI/app-server auth.
 oauth_file = "~/.hermes/auth.json"
 codex_home = "~/.codex"
-# Canonical external skills dir mirrored into each agent profile.
-canonical_skills_dir = "/home/delorenj/.agents/skills"
+# Skill selection lives in global/project .agents/skills.json. Step 10 uses
+# pinned Skillex profile sync; no external projection path is configured here.
 # Optional Vox plugin + service defaults for Hermes PM agents.
 vox_plugin_name = "vox"
 vox_plugin_dir = "~/code/voxxy/plugins/tts/vox"
@@ -48,15 +51,6 @@ onepassword_item_prefix = "hermes-agent"
 # This is the fleet-wide Hermes inference/skill config (model, toolsets, etc.)
 # every agent runtime starts from. ~ is expanded.
 # canonical_pm_config = "~/.hermes/config.yaml"
-# Skills symlinked into every agent's runtime skills root.
-symlinked_runtime_skills = [
-  "delonet-conventions",
-  "delonet-dotenv",
-  "hermes-pm-template-maintenance",
-  "hindsight",
-  "33god-projects",
-  "subagent-driven-development",
-]
 
 [github]
 # LEGACY INERT COMPATIBILITY METADATA ONLY. Older role manifests may still

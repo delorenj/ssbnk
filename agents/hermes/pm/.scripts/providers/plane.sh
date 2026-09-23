@@ -32,6 +32,24 @@ ROLE_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 ROLE_YAML="$ROLE_DIR/role.yaml"
 BASE="${PLANE_BASE:-https://plane.delo.sh}"
 
+# Managed/shadow execution owns every mutation; stop before credential fallback.
+EXECUTION_MODE="$(python3 - "$ROLE_DIR" <<'PYMODE'
+import json, pathlib, sys
+for parent in [pathlib.Path(sys.argv[1]), *pathlib.Path(sys.argv[1]).parents]:
+    path=parent/'.project.json'
+    if path.exists():
+        print(json.loads(path.read_text()).get('execution',{}).get('mode','legacy')); break
+PYMODE
+)"
+case "$EXECUTION_MODE" in
+  managed|shadow)
+    case "$OP" in
+      resolve|describe_board|list_issues|list_states|list_labels|active_milestone|get_issue) ;;
+      *) echo "plane: $EXECUTION_MODE lifecycle writes require px task through Krebs" >&2; exit 78 ;;
+    esac ;;
+esac
+
+
 FLEET_ENV="${HERMES_FLEET_ENV:-$HOME/.hermes/fleet.env}"
 
 die() { echo "plane: $*" >&2; exit 1; }
@@ -377,6 +395,7 @@ resolve_state_id() {
   want="$1"
   [ -n "$PROJ" ] || die "ticket_provider.project not set"
   case "$want" in
+    awaiting_decision|needs_attention) grp=started; nm="Needs Attention" ;;
     completed) grp=completed; nm="$SM_DONE" ;;
     cancelled) grp=cancelled; nm="$SM_CANCELLED" ;;
     in_review) grp=started;   nm="$SM_IN_REVIEW" ;;

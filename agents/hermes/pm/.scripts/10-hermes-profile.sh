@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Create or reconcile the initial named Hermes profile without cloning secrets.
 # The directory remains REAL. Step 20 delegates final shared-vs-owned link
-# topology to `pj migrate hermes.runtime-singleton`; no template step may
+# topology to `flume remediate hermes.runtime-singleton`; no template step may
 # replace the profile itself with a symlink.
 
 if [[ "${SKIP_HOST_STATE:-0}" == "1" ]]; then
@@ -20,7 +20,7 @@ PROFILE_HOME="$HOME/.hermes/profiles/$PROFILE_NAME"
 # from the link target before the singleton-runtime migration can preserve
 # them.  Refuse the legacy topology before any profile mutation.
 if [[ -L "$PROFILE_HOME" ]]; then
-  die "legacy named profile symlink detected at $PROFILE_HOME; refusing mutation. Run: pj migrate hermes.runtime-singleton '$(project_repo_path 2>/dev/null || printf '%s' "$ROLE_DIR")'"
+  die "legacy named profile symlink detected at $PROFILE_HOME; refusing mutation. Run: flume remediate hermes.runtime-singleton '$(project_repo_path 2>/dev/null || printf '%s' "$ROLE_DIR")'"
 fi
 PROFILE_DELTA_SEEDER="$ROLE_DIR/.scripts/lib/profile-config-seed.py"
 [[ -f "$PROFILE_DELTA_SEEDER" && ! -L "$PROFILE_DELTA_SEEDER" ]] \
@@ -29,40 +29,14 @@ PROFILE_DELTA_SEEDER="$ROLE_DIR/.scripts/lib/profile-config-seed.py"
 already_done 10-hermes-profile \
   && log "[10] profile marker found — revalidating required profile contract"
 
-# Skillex projects the canonical global catalog into ~/.agents/skills. These
-# six skills are the immutable deployed PM contract, not optional suggestions.
-# Validate the complete set before any profile mutation so a partial/missing
-# projection cannot warn and then be falsely reported as provisioned.
-CANONICAL_SKILLS_DIR="${CANONICAL_SKILLS_DIR:-$(config_get fleet.canonical_skills_dir "$HOME/.agents/skills")}"
-CORE_RUNTIME_SKILLS=(
-  33god-projects
-  delonet-conventions
-  delonet-dotenv
-  hermes-pm-template-maintenance
-  hindsight
-  subagent-driven-development
-)
-OPTIONAL_RUNTIME_SKILLS_TEXT="${SYMLINKED_RUNTIME_SKILLS:-$(config_get fleet.symlinked_runtime_skills '')}"
-read -r -a OPTIONAL_RUNTIME_SKILLS <<< "$OPTIONAL_RUNTIME_SKILLS_TEXT"
-SYMLINKED_RUNTIME_SKILLS=("${CORE_RUNTIME_SKILLS[@]}")
-for skill_name in "${OPTIONAL_RUNTIME_SKILLS[@]}"; do
-  [[ -n "$skill_name" ]] || continue
-  skill_present=0
-  for required_name in "${SYMLINKED_RUNTIME_SKILLS[@]}"; do
-    [[ "$required_name" == "$skill_name" ]] && { skill_present=1; break; }
-  done
-  [[ $skill_present -eq 1 ]] || SYMLINKED_RUNTIME_SKILLS+=("$skill_name")
-done
-missing_runtime_skills=()
-for skill_name in "${SYMLINKED_RUNTIME_SKILLS[@]}"; do
-  [[ -f "$CANONICAL_SKILLS_DIR/$skill_name/SKILL.md" ]] \
-    || missing_runtime_skills+=("$skill_name")
-done
-if [[ ${#missing_runtime_skills[@]} -gt 0 ]]; then
-  clear_done 10-hermes-profile
-  die "required Skillex projection missing SKILL.md for: ${missing_runtime_skills[*]} (run the global Skillex sync, then rerun)"
-fi
-log "[10] required Skillex skills validated: ${SYMLINKED_RUNTIME_SKILLS[*]}"
+# Select this role's owning project explicitly. Skillex alone resolves the
+# global/project union and owns its recorded children; runtime-local entries win.
+PROJECT_PATH="$(project_repo_path)" \
+  || die "cannot resolve the owning project; set PJANGLER_PROJECT_ROOT explicitly"
+[[ -f "$PROJECT_PATH/.agents/skills.json" ]] \
+  || die "project selection is missing: $PROJECT_PATH/.agents/skills.json; run skillex init --project '$PROJECT_PATH'"
+command -v mise >/dev/null 2>&1 \
+  || die "mise and Node.js 24+ are required for @delorenj/skillex@0.1.1"
 
 log "[10] creating hermes profile: $PROFILE_NAME"
 
@@ -73,6 +47,15 @@ else
   # inspect it, transiently materializing every credential in the new profile.
   # Start clean; required skills and the project SOUL are installed below.
   "$HERMES_BIN" profile create "$PROFILE_NAME" --no-alias
+fi
+
+# Activate before touching unrelated profile state. The profile and its skills
+# directory remain real; Skillex refuses a legacy whole-directory link with an
+# actionable migration finding. Its receipts live outside the project in XDG state.
+if ! mise exec npm:@delorenj/skillex@0.1.1 -- skillex profile sync "$PROFILE_NAME" \
+    --hermes-root "$HOME/.hermes" --project "$PROJECT_PATH"; then
+  clear_done 10-hermes-profile
+  die "Skillex profile sync failed; resolve its findings and rerun this step"
 fi
 
 # Strip any inherited gateway/runtime state so this profile boots clean.
@@ -145,8 +128,52 @@ fi
 # that also failed to resolve.
 PROFILE_MEM_CFG="$PROFILE_HOME/hindsight/config.json"
 mkdir -p "$(dirname "$PROFILE_MEM_CFG")"
-if [[ ! -f "$PROFILE_MEM_CFG" ]]; then
-  log "    pinning identity-memory bank: agent-$PROFILE_NAME"
+PROFILE_RENDERER="${PROFILE_RENDERER:-$HOME/code/33GOD/hermes-agent-template/scripts/hermes-profile-config.py}"
+
+# A named travelling agent declares its durable bank in the registry. Read that
+# declaration by agent id, never by profile/post name. The registry is written
+# by step 80, so an absent row is the normal first-provision path for legacy PMs.
+DECLARED_PERSONAL_BANK="$(python3 - "$REGISTRY_FILE" "$AGENT_ID" <<'PYEOF'
+import pathlib
+import re
+import sys
+
+registry, agent_id = sys.argv[1:3]
+path = pathlib.Path(registry)
+if not path.is_file() or path.is_symlink():
+    raise SystemExit(0)
+try:
+    import yaml
+    document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    entry = (document.get("agents") or {}).get(agent_id) or {}
+except Exception as exc:
+    raise SystemExit(f"cannot read fleet registry for {agent_id}: {exc}")
+if not isinstance(entry, dict):
+    raise SystemExit(f"fleet registry entry for {agent_id} must be a mapping")
+identity = entry.get("identity")
+hindsight = entry.get("hindsight")
+bank = hindsight.get("write_bank") if isinstance(hindsight, dict) else None
+if identity is not None and (not isinstance(identity, str) or not identity.strip()):
+    raise SystemExit(f"fleet registry identity for {agent_id} must be a non-empty string")
+if identity is not None and bank is None:
+    raise SystemExit(f"named agent {agent_id} must declare hindsight.write_bank")
+if bank is not None:
+    if not isinstance(bank, str) or re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", bank) is None:
+        raise SystemExit(f"hindsight.write_bank for {agent_id} must be a lower-case bank identifier")
+    if identity is not None and bank != f"agent-{identity}":
+        raise SystemExit(f"hindsight.write_bank for {agent_id} must be agent-{identity}")
+    print(bank)
+PYEOF
+)" || die "named-agent bank declaration is invalid in $REGISTRY_FILE"
+
+if [[ -n "$DECLARED_PERSONAL_BANK" ]]; then
+  [[ -f "$PROFILE_RENDERER" ]] \
+    || die "named-agent bank declaration requires the canonical profile renderer: $PROFILE_RENDERER"
+  log "    pinning declared identity-memory bank: $DECLARED_PERSONAL_BANK"
+  python3 "$PROFILE_RENDERER" memory-pin --profile "$PROFILE_NAME" --bank-id "$DECLARED_PERSONAL_BANK" \
+    >/dev/null || die "canonical profile renderer could not pin $DECLARED_PERSONAL_BANK"
+elif [[ ! -f "$PROFILE_MEM_CFG" ]]; then
+  log "    pinning compatibility identity-memory bank: agent-$PROFILE_NAME"
   printf '{\n  "bank_id": "agent-%s"\n}\n' "$PROFILE_NAME" > "$PROFILE_MEM_CFG"
   chmod 600 "$PROFILE_MEM_CFG"
 fi
@@ -154,63 +181,12 @@ fi
 # Render config.yaml from base + delta when the renderer is available. Without
 # it the profile still boots (Hermes reads whatever config.yaml exists), but it
 # is not yet under inheritance and `pj audit` will say so.
-PROFILE_RENDERER="${PROFILE_RENDERER:-$HOME/code/33GOD/hermes-agent-template/scripts/hermes-profile-config.py}"
 if [[ -x "$PROFILE_RENDERER" || -f "$PROFILE_RENDERER" ]]; then
   log "    rendering config.yaml from fleet base + delta"
   python3 "$PROFILE_RENDERER" render --profile "$PROFILE_NAME" >/dev/null 2>&1 \
     || warn "    render failed; run hermes-profile-config.py render --profile $PROFILE_NAME"
 else
   warn "    profile renderer not found at $PROFILE_RENDERER — config.yaml not rendered"
-fi
-
-# Canonical shared-skill source of truth + local PM fallback sync.
-CANONICAL_PM_SKILL_SRC="$CANONICAL_SKILLS_DIR/subagent-driven-development"
-LOCAL_PM_SKILL_DST="$PROFILE_HOME/skills/software-development/subagent-driven-development"
-
-if [[ -d "$CANONICAL_SKILLS_DIR" ]]; then
-  # skills.external_dirs is a FLEET setting and already lives in
-  # ~/.hermes/config.yaml, so every rendered profile inherits it. Writing it
-  # per-profile here would (a) be redundant, and (b) write into the GENERATED
-  # config.yaml, where the next render discards it — the classic "I set it and
-  # it reverted" trap. Verify inheritance instead of re-asserting it.
-  if ! env HERMES_HOME="$PROFILE_HOME" "$HERMES_BIN" config get skills.external_dirs 2>/dev/null \
-       | grep -qF "$CANONICAL_SKILLS_DIR"; then
-    warn "    skills.external_dirs does not include $CANONICAL_SKILLS_DIR"
-    warn "    add it to the FLEET base (~/.hermes/config.yaml), then: hermes-profile-config.py render --all"
-  else
-    log "    skills.external_dirs inherited from fleet base: $CANONICAL_SKILLS_DIR"
-  fi
-
-  # Ensure key PM/local-ops skills are symlinked into runtime/profile skills root.
-  # This preserves canonical ownership and keeps updates instant across agents.
-  mkdir -p "$PROFILE_HOME/skills"
-
-  for skill_name in "${SYMLINKED_RUNTIME_SKILLS[@]}"; do
-    src="$CANONICAL_SKILLS_DIR/$skill_name"
-    dst="$PROFILE_HOME/skills/$skill_name"
-
-    [[ -f "$src/SKILL.md" ]] \
-      || die "required Skillex skill disappeared during provisioning: $src/SKILL.md"
-
-    if [[ -L "$dst" && "$(readlink "$dst")" == "$src" ]]; then
-      log "    runtime skill symlink already set: $dst -> $src"
-      continue
-    fi
-
-    [[ -e "$dst" || -L "$dst" ]] && rm -rf "$dst"
-    ln -s "$src" "$dst"
-    log "    symlinked runtime skill: $dst -> $src"
-  done
-else
-  die "canonical Skillex projection directory disappeared during provisioning: $CANONICAL_SKILLS_DIR"
-fi
-
-if [[ -f "$CANONICAL_PM_SKILL_SRC/SKILL.md" ]]; then
-  log "    syncing canonical PM workflow skill -> $LOCAL_PM_SKILL_DST"
-  mkdir -p "$LOCAL_PM_SKILL_DST"
-  cp -f "$CANONICAL_PM_SKILL_SRC/SKILL.md" "$LOCAL_PM_SKILL_DST/SKILL.md"
-else
-  die "required canonical PM skill disappeared during provisioning: $CANONICAL_PM_SKILL_SRC/SKILL.md"
 fi
 
 # Install the project's SOUL.md into the profile so the agent loads it.

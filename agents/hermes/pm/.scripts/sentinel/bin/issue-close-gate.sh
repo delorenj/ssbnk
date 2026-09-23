@@ -35,16 +35,16 @@ try:
     document = json.loads(path.read_text(encoding="utf-8"))
 except (OSError, UnicodeError, json.JSONDecodeError) as exc:
     raise SystemExit(f"close gate: malformed project manifest {path}: {exc}")
-slug = document.get("project_slug") if isinstance(document, dict) else None
+slug = document.get("project_id", document.get("project_slug")) if isinstance(document, dict) else None
 if not isinstance(slug, str) or not slug.strip():
-    raise SystemExit(f"close gate: project manifest {path} has no non-blank project_slug")
-print(slug.strip())
+    raise SystemExit(f"close gate: project manifest {path} has no non-blank project_id")
+print(slug.strip().lower())
 PY
 )" || exit 1
 else
   REPO_SLUG="$(basename "$ROOT")"
 fi
-if [ -n "$ROLE_REPO" ] && [ "$ROLE_REPO" != "$REPO_SLUG" ]; then
+if [ -n "$ROLE_REPO" ] && [ "$(printf '%s' "$ROLE_REPO" | tr '[:upper:]' '[:lower:]')" != "$REPO_SLUG" ]; then
   printf 'Installed role repo %s disagrees with target project slug %s.\n' "$ROLE_REPO" "$REPO_SLUG" >&2
   exit 1
 fi

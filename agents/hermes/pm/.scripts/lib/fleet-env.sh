@@ -9,7 +9,7 @@ __PJANGLER_FLEET_ENV_LIBRARY_LOADED=1
 
 # fleet.env is shared configuration, not authority to inject code into Python,
 # shell, Node, or dynamic-loader children. PATH remains intact so explicitly
-# configured Hermes/PJangler/provider tools still resolve.
+# configured Hermes/Flume/provider tools still resolve.
 subprocess_injection_key_is_unsafe() {
   local key="$1" loader_key="$1"
   case "$key" in

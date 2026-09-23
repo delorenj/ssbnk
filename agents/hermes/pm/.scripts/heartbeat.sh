@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Unified agent heartbeat: continuous board-reconciliation sentinel pass +
-# gated runtime checkpoint, fused into one systemd-timer tick.
+# board-reconciliation pass.
 #
 # Runs often (systemd timer, ~1 min). Only invokes Hermes for a full
 # reconciliation pass when local state says no worker is active, the worker
@@ -8,9 +8,6 @@
 # full pass executes the role's sentinel.prompt.md, which reasons about tickets
 # through the ticket-provider adapter (Linear | Plane | Trello) — never a
 # hardcoded backend. After the sentinel decision (skip OR full), it
-# opportunistically checkpoints only legacy nested-Git runtimes at most once
-# per HEARTBEAT_CHECKPOINT_MIN_INTERVAL_SECONDS, so memory/session state stays
-# durable without pushing every minute.
 set -euo pipefail
 
 ROLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # agents/hermes/<role>
@@ -24,8 +21,6 @@ FLEET_ENV="${HERMES_FLEET_ENV:-$HOME/.hermes/fleet.env}"
 FLEET_ENV_LIBRARY="$ROLE_DIR/.scripts/lib/fleet-env.sh"
 FLEET_ENV_PARSER="$ROLE_DIR/.scripts/lib/parse-fleet-env.py"
 LOG_FILE="$RUNTIME/logs/heartbeat.log"
-CHECKPOINT_BIN="$ROLE_DIR/.scripts/checkpoint.sh"
-CHECKPOINT_STAMP="$RUNTIME/.last-checkpoint"
 
 if [[ ! -f "$FLEET_ENV_LIBRARY" || -L "$FLEET_ENV_LIBRARY" \
    || ! -f "$FLEET_ENV_PARSER" || -L "$FLEET_ENV_PARSER" ]]; then
@@ -49,24 +44,7 @@ fi
 ACTIVE_MAX_IDLE_SECONDS="${SENTINEL_ACTIVE_MAX_IDLE_SECONDS:-600}"
 FULL_RUN_COOLDOWN_SECONDS="${SENTINEL_FULL_RUN_COOLDOWN_SECONDS:-300}"
 BLOCKED_FULL_RUN_COOLDOWN_SECONDS="${SENTINEL_BLOCKED_FULL_RUN_COOLDOWN_SECONDS:-900}"
-CHECKPOINT_MIN_INTERVAL_SECONDS="${HEARTBEAT_CHECKPOINT_MIN_INTERVAL_SECONDS:-3600}"
 
-# Opportunistic runtime checkpoint, fused into the heartbeat. Runs at most once
-# per interval; checkpoint.sh is itself a no-op on a clean tree, so this only
-# commits+pushes when there is genuinely new state AND enough time has passed
-# since the last push. Never fails the heartbeat — checkpoint is best-effort.
-maybe_checkpoint() {
-  [[ -x "$CHECKPOINT_BIN" ]] || return 0
-  local now last
-  now="$(date +%s)"
-  last="$(cat "$CHECKPOINT_STAMP" 2>/dev/null || echo 0)"
-  [[ "$last" =~ ^[0-9]+$ ]] || last=0
-  if (( now - last >= CHECKPOINT_MIN_INTERVAL_SECONDS )); then
-    printf '%s' "$now" > "$CHECKPOINT_STAMP" 2>/dev/null || true
-    printf '[heartbeat] checkpoint tick (>= %ss since last push)\n' "$CHECKPOINT_MIN_INTERVAL_SECONDS"
-    "$CHECKPOINT_BIN" || true
-  fi
-}
 
 yaml_value() {
   python3 - "$ROLE_YAML" "$1" <<'PYEOF'
@@ -121,6 +99,11 @@ repo_root() {
 }
 REPO_ROOT="$(repo_root)"
 cd "$REPO_ROOT"
+EXECUTION_MODE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("execution",{}).get("mode","legacy"))' "$REPO_ROOT/.project.json")"
+if [[ "$EXECUTION_MODE" == managed || "$EXECUTION_MODE" == shadow ]]; then
+  KREBS_PLANNER_ENABLED="$(reconcile_enabled)" exec python3 "$ROLE_DIR/.scripts/managed-execution.py" "$REPO_ROOT"
+fi
+
 mkdir -p "$RUNTIME/logs"
 
 # Single-run lock. Prefer flock (Linux); fall back to an atomic mkdir lock so
@@ -146,10 +129,9 @@ fi
 
 # Reconcile gate: the autonomous board-reconciliation pass runs only when
 # role.yaml's reconcile.enabled is true. Deployed PMs default on; setting it
-# false explicitly opts into checkpoint-only operation.
+# false explicitly opts out of the autonomous board pass.
 if [[ "$(reconcile_enabled)" != "true" ]]; then
-  printf '[heartbeat] reconcile disabled (reconcile.enabled != true) — checkpoint-only tick\n'
-  maybe_checkpoint
+  printf '[heartbeat] reconcile disabled (reconcile.enabled != true) — nothing to do\n'
   exit 0
 fi
 
@@ -220,7 +202,6 @@ state.setdefault("updated_at", now_iso); state.setdefault("summary", state.get("
 tmp = path.with_suffix(path.suffix + ".tmp"); tmp.write_text(json.dumps(state, indent=2, sort_keys=True)+"\n"); tmp.replace(path)
 PYEOF
     printf '[heartbeat] %s\n' "$decision"
-    maybe_checkpoint
     exit 0
     ;;
 esac
@@ -247,7 +228,6 @@ PYEOF
 WIP_LOCK="$RUNTIME/wip-driver.lock"
 if ! python3 "$ROLE_DIR/.scripts/momo-wip-lock.py" acquire "$WIP_LOCK" "hermes:$AGENT_ID" --ttl 3600 >/dev/null 2>&1; then
   printf '[heartbeat] WIP lease held by Momo — skipping full reconcile pass this tick\n'
-  maybe_checkpoint
   exit 0
 fi
 trap 'python3 "$ROLE_DIR/.scripts/momo-wip-lock.py" release "$WIP_LOCK" "hermes:$AGENT_ID" >/dev/null 2>&1 || true' EXIT
@@ -279,5 +259,4 @@ tmp = path.with_suffix(path.suffix + ".tmp"); tmp.write_text(json.dumps(state, i
 print(0 if state.get("status") in {"active","blocked","stalled","idle"} else exit_code)
 PYEOF
 )"
-maybe_checkpoint
 exit "$runner_exit"
