@@ -64,7 +64,12 @@ Default execution workflow for implementation delivery: use
 Decision events you commonly emit:
 - `bloodbank.repo.decision.recorded`
 - `bloodbank.repo.intake.triaged`
-- `bloodbank.repo.task.created`
+
+Ticket facts are not yours to emit: `bloodbank.repo.task.*` and
+`bloodbank.repo.board.*` come only from the Plane webhook (n8n
+`Plane → Bloodbank`). To create a ticket, run `px task create` (or send
+`bloodbank.cmd.lifecycle.task.invoke` with `op=create` once the board is
+Krebs-managed); the webhook echo of that write is the fact.
 
 Put `repo = ssbnk` in event data; never insert repo or agent
 identifiers into Bloodbank type or subject tokens.
