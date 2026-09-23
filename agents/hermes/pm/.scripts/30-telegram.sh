@@ -6,10 +6,15 @@
 # or be silently reused by a profile. The non-secret allow-list may be shared.
 INVOCATION_TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN-}"
 INVOCATION_TELEGRAM_ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS-}"
+# A token the operator already stored in 1Password is adopted by REFERENCE:
+# TELEGRAM_BOT_TOKEN_REF=op://<vault>/<item>/<field>. The bot is verified with
+# getMe exactly like a pasted token, but no new vault item is staged -- the
+# profile maps the operator's own reference.
+INVOCATION_TELEGRAM_BOT_TOKEN_REF="${TELEGRAM_BOT_TOKEN_REF-}"
 # Invocation credentials may have arrived as exported variables.  Remove them
 # before even resolving/sourcing _lib.sh: that path invokes utilities and loads
 # fleet state, and no child involved in setup should inherit a raw token.
-unset TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USERS
+unset TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USERS TELEGRAM_BOT_TOKEN_REF
 
 # Every channel write lands in the host-global profile root that 10-hermes-profile.sh
 # creates. When that step is deferred the root does not exist yet, so there is no
@@ -31,7 +36,23 @@ if [[ -n "$INVOCATION_TELEGRAM_ALLOWED_USERS" ]]; then
 else
   TELEGRAM_ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS-}"
 fi
-unset INVOCATION_TELEGRAM_BOT_TOKEN INVOCATION_TELEGRAM_ALLOWED_USERS
+TELEGRAM_ADOPTED_REFERENCE="$INVOCATION_TELEGRAM_BOT_TOKEN_REF"
+unset INVOCATION_TELEGRAM_BOT_TOKEN INVOCATION_TELEGRAM_ALLOWED_USERS INVOCATION_TELEGRAM_BOT_TOKEN_REF
+
+if [[ -n "$TELEGRAM_ADOPTED_REFERENCE" ]]; then
+  [[ -z "${TELEGRAM_BOT_TOKEN:-}" ]] \
+    || die "pass TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN_REF, not both"
+  [[ "$TELEGRAM_ADOPTED_REFERENCE" == op://* && "$TELEGRAM_ADOPTED_REFERENCE" != *[$'\r\n']* ]] \
+    || die "TELEGRAM_BOT_TOKEN_REF must be an op:// reference"
+  [[ -f "$ROLE_DIR/.scripts/store-onepassword-secret.py" && ! -L "$ROLE_DIR/.scripts/store-onepassword-secret.py" ]] \
+    || die "trusted 1Password storage helper is missing"
+  # Command substitution keeps the value in an unexported variable: it never
+  # enters argv or any child's environment.
+  TELEGRAM_BOT_TOKEN="$(python3 -I "$ROLE_DIR/.scripts/store-onepassword-secret.py" \
+    --read-reference "$TELEGRAM_ADOPTED_REFERENCE")" \
+    || die "TELEGRAM_BOT_TOKEN_REF did not resolve in 1Password"
+  [[ -n "$TELEGRAM_BOT_TOKEN" ]] || die "TELEGRAM_BOT_TOKEN_REF resolved to an empty value"
+fi
 
 PROFILE_HOME="$HOME/.hermes/profiles/$PROFILE_NAME"
 profile_root_require_real "$PROFILE_HOME"
@@ -148,7 +169,8 @@ if already_done 30-telegram; then
   log "[30] existing completion marker preserved while Telegram is reconciled"
 fi
 
-cat >&2 <<EOF
+# An adopted vault reference already names a bot; BotFather steps are noise.
+[[ -n "$TELEGRAM_ADOPTED_REFERENCE" ]] || cat >&2 <<EOF
 
 ╭─ BotFather steps for @$BOT_HANDLE ─────────────────────────────────────╮
 │ 1. Open Telegram, message @BotFather                                   │
@@ -317,21 +339,29 @@ for owner, path in owners:
 # metadata, so a failed vault stage cannot leave a false ownership claim.
 PYEOF
 
-# Stage the credential in a new immutable 1Password item. The helper verifies
-# the staged field and returns the immutable item id plus reference; no local
-# ownership/config state has changed yet.
-ONEPASSWORD_ITEM_PREFIX="${HERMES_ONEPASSWORD_ITEM_PREFIX:-$(config_get fleet.onepassword_item_prefix 'hermes-agent')}"
-telegram_stage="$(stage_onepassword_secret \
-  "${ONEPASSWORD_ITEM_PREFIX}-${AGENT_ID}-telegram-bot-token" \
-  telegram_bot_token "$TELEGRAM_BOT_TOKEN")" \
-  || die "Telegram credential could not be staged and verified in 1Password"
-if [[ "$telegram_stage" != *$'\n'* ]]; then
-  die "Telegram credential staging returned an invalid result"
+if [[ -n "$TELEGRAM_ADOPTED_REFERENCE" ]]; then
+  # The credential already lives in the vault under the operator's own item:
+  # map that reference. Nothing is staged, so a failed transaction has no
+  # staged item to archive.
+  telegram_staged_item_id=""
+  telegram_reference="$TELEGRAM_ADOPTED_REFERENCE"
+else
+  # Stage the credential in a new immutable 1Password item. The helper verifies
+  # the staged field and returns the immutable item id plus reference; no local
+  # ownership/config state has changed yet.
+  ONEPASSWORD_ITEM_PREFIX="${HERMES_ONEPASSWORD_ITEM_PREFIX:-$(config_get fleet.onepassword_item_prefix 'hermes-agent')}"
+  telegram_stage="$(stage_onepassword_secret \
+    "${ONEPASSWORD_ITEM_PREFIX}-${AGENT_ID}-telegram-bot-token" \
+    telegram_bot_token "$TELEGRAM_BOT_TOKEN")" \
+    || die "Telegram credential could not be staged and verified in 1Password"
+  if [[ "$telegram_stage" != *$'\n'* ]]; then
+    die "Telegram credential staging returned an invalid result"
+  fi
+  telegram_staged_item_id="${telegram_stage%%$'\n'*}"
+  telegram_reference="${telegram_stage#*$'\n'}"
+  [[ "$telegram_reference" != *$'\n'* ]] \
+    || die "Telegram credential staging returned too many references"
 fi
-telegram_staged_item_id="${telegram_stage%%$'\n'*}"
-telegram_reference="${telegram_stage#*$'\n'}"
-[[ "$telegram_reference" != *$'\n'* ]] \
-  || die "Telegram credential staging returned too many references"
 unset TELEGRAM_BOT_TOKEN
 
 # From here until commit, any failure archives the staged item by immutable id

@@ -1872,19 +1872,34 @@ def render_generated(base: dict, delta: dict) -> bytes:
     return (header + yaml.safe_dump(merge(base, delta), sort_keys=False)).encode("utf-8")
 
 
-def update_role(original: bytes, channel: str, metadata: dict[str, str]) -> bytes:
-    text = original.decode("utf-8")
+def role_channel_block(text: str, channel: str) -> re.Match[str]:
+    """The channel's top-level block in role.yaml: its header and indented body.
+
+    MULTILINE only, never DOTALL. Under DOTALL `.*` crosses newlines, so the
+    body ran to end-of-file and a key the block lacked was appended to the
+    LAST block in the file (a deferred Telegram wrote
+    `service_state.provisioning_status`), while a key another block carried
+    (slack's `bot_id`) was rewritten there instead of here. The body ends at the
+    first line that is not indented: a column-0 comment, a blank line or the
+    next key.
+    """
     match = re.search(
-        rf"(?ms)^{re.escape(channel)}:\s*\n(?P<body>(?:^[ \t]+.*\n?)*)", text
+        rf"(?m)^{re.escape(channel)}:[ \t]*\n(?P<body>(?:^[ \t]+.*\n?)*)", text
     )
     if not match:
         fail(f"{channel} metadata block missing from role.yaml")
+    return match
+
+
+def update_role(original: bytes, channel: str, metadata: dict[str, str]) -> bytes:
+    text = original.decode("utf-8")
+    match = role_channel_block(text, channel)
     body = match.group("body")
     for key in CHANNEL_FIELDS[channel]:
         value = metadata[key]
         replacement = f"  {key}: {json.dumps(value)}"
         body, count = re.subn(
-            rf"(?m)^\s+{re.escape(key)}:\s*.*$", lambda _: replacement, body, count=1
+            rf"(?m)^[ \t]+{re.escape(key)}:[ \t]*.*$", lambda _: replacement, body, count=1
         )
         if count == 0:
             if body and not body.endswith("\n"):
@@ -1897,15 +1912,11 @@ def update_role(original: bytes, channel: str, metadata: dict[str, str]) -> byte
 
 def update_role_status(original: bytes, channel: str, status_value: str) -> bytes:
     text = original.decode("utf-8")
-    match = re.search(
-        rf"(?ms)^{re.escape(channel)}:\s*\n(?P<body>(?:^[ \t]+.*\n?)*)", text
-    )
-    if not match:
-        fail(f"{channel} metadata block missing from role.yaml")
+    match = role_channel_block(text, channel)
     body = match.group("body")
     replacement = f"  provisioning_status: {json.dumps(status_value)}"
     body, count = re.subn(
-        r"(?m)^\s+provisioning_status:\s*.*$", lambda _: replacement, body, count=1
+        r"(?m)^[ \t]+provisioning_status:[ \t]*.*$", lambda _: replacement, body, count=1
     )
     if count == 0:
         if body and not body.endswith("\n"):

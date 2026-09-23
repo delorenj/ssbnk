@@ -130,29 +130,51 @@ PROFILE_MEM_CFG="$PROFILE_HOME/hindsight/config.json"
 mkdir -p "$(dirname "$PROFILE_MEM_CFG")"
 PROFILE_RENDERER="${PROFILE_RENDERER:-$HOME/code/33GOD/hermes-agent-template/scripts/hermes-profile-config.py}"
 
-# A named travelling agent declares its durable bank in the registry. Read that
-# declaration by agent id, never by profile/post name. The registry is written
-# by step 80, so an absent row is the normal first-provision path for legacy PMs.
-DECLARED_PERSONAL_BANK="$(python3 - "$REGISTRY_FILE" "$AGENT_ID" <<'PYEOF'
+# A named travelling agent declares WHO it is in role.yaml (`identity:`), and
+# its durable personal bank follows the name, never the post/profile. role.yaml
+# is the source; 80-registry.sh projects it into the registry. This step runs
+# BEFORE step 80, so it reads role.yaml first and only falls back to a registry
+# declaration for rows named before role.yaml carried the block.
+ROLE_IDENTITY_READER="$ROLE_DIR/.scripts/lib/role-identity.py"
+[[ -f "$ROLE_IDENTITY_READER" && ! -L "$ROLE_IDENTITY_READER" ]] \
+  || die "trusted role identity reader is unavailable: $ROLE_IDENTITY_READER"
+ROLE_IDENTITY_JSON="$(python3 -I "$ROLE_IDENTITY_READER" "$ROLE_YAML" "$AGENT_ID" "$PROFILE_NAME")" \
+  || die "role.yaml identity block is invalid"
+DECLARED_PERSONAL_BANK="$(python3 - "$REGISTRY_FILE" "$AGENT_ID" "$ROLE_IDENTITY_JSON" <<'PYEOF'
+import json
 import pathlib
 import re
 import sys
 
-registry, agent_id = sys.argv[1:3]
+registry, agent_id, role_identity_json = sys.argv[1:4]
+role_identity = json.loads(role_identity_json or "{}")
+entry = {}
 path = pathlib.Path(registry)
-if not path.is_file() or path.is_symlink():
-    raise SystemExit(0)
-try:
-    import yaml
-    document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    entry = (document.get("agents") or {}).get(agent_id) or {}
-except Exception as exc:
-    raise SystemExit(f"cannot read fleet registry for {agent_id}: {exc}")
+if path.is_file() and not path.is_symlink():
+    try:
+        import yaml
+        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        entry = (document.get("agents") or {}).get(agent_id) or {}
+    except Exception as exc:
+        raise SystemExit(f"cannot read fleet registry for {agent_id}: {exc}")
 if not isinstance(entry, dict):
     raise SystemExit(f"fleet registry entry for {agent_id} must be a mapping")
 identity = entry.get("identity")
 hindsight = entry.get("hindsight")
 bank = hindsight.get("write_bank") if isinstance(hindsight, dict) else None
+
+if role_identity:
+    # role.yaml wins. A disagreeing registry row is stale until step 80
+    # re-projects it; say so, but do not refuse the pin the SSOT asks for.
+    if identity is not None and identity != role_identity["name"]:
+        print(f"registry names {agent_id} {identity!r}; role.yaml says "
+              f"{role_identity['name']!r} and wins (step 80 converges the row)", file=sys.stderr)
+    elif bank is not None and bank != role_identity["write_bank"]:
+        print(f"registry pins {agent_id} to {bank!r}; role.yaml says "
+              f"{role_identity['write_bank']!r} and wins (step 80 converges the row)", file=sys.stderr)
+    print(role_identity["write_bank"])
+    raise SystemExit(0)
+
 if identity is not None and (not isinstance(identity, str) or not identity.strip()):
     raise SystemExit(f"fleet registry identity for {agent_id} must be a non-empty string")
 if identity is not None and bank is None:
@@ -164,7 +186,7 @@ if bank is not None:
         raise SystemExit(f"hindsight.write_bank for {agent_id} must be agent-{identity}")
     print(bank)
 PYEOF
-)" || die "named-agent bank declaration is invalid in $REGISTRY_FILE"
+)" || die "named-agent bank declaration is invalid (role.yaml identity or $REGISTRY_FILE)"
 
 if [[ -n "$DECLARED_PERSONAL_BANK" ]]; then
   [[ -f "$PROFILE_RENDERER" ]] \

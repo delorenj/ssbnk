@@ -73,6 +73,20 @@ if len(sys.argv) == 3 and sys.argv[1] == "--validate-reference":
         fail("the configured reference did not resolve")
     raise SystemExit(0)
 
+if len(sys.argv) == 3 and sys.argv[1] == "--read-reference":
+    # Adopt a credential that already lives in the vault (a bot token the
+    # operator stored by hand). The value goes to stdout for the caller to hold
+    # in an unexported shell variable; it never reaches argv or the environment.
+    reference = sys.argv[2]
+    if not reference.startswith("op://") or any(ch in reference for ch in "\r\n\0"):
+        fail("invalid 1Password reference")
+    resolved = op_run(["read", "--", reference])
+    value = resolved.stdout.rstrip("\n")
+    if resolved.returncode != 0 or not value:
+        fail("the configured reference did not resolve")
+    sys.stdout.write(value)
+    raise SystemExit(0)
+
 if len(sys.argv) == 4 and sys.argv[1] == "--delete-item-id":
     vault, item_id = sys.argv[2:]
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._ -]{0,126}", vault):

@@ -128,14 +128,19 @@ else:
     raise SystemExit("yaml_upsert_block_value: unsupported scalar type")
 p = pathlib.Path(path)
 text = p.read_text(encoding="utf-8")
+# MULTILINE only, never DOTALL: under DOTALL `.*` crosses newlines, the body
+# ran to end-of-file, and a key the block lacked was appended after the LAST
+# line of the file (70-systemd.sh wrote `  explicit_opt_out: false` under
+# `provisioned_by:`, which is invalid YAML). The body ends at the first line
+# that is not indented. Same fix as channel-transaction.py role_channel_block.
 match = re.search(
-    rf"(?ms)^{re.escape(parent)}:\s*\n(?P<body>(?:^[ \t]+.*\n?)*)", text
+    rf"(?m)^{re.escape(parent)}:[ \t]*\n(?P<body>(?:^[ \t]+.*\n?)*)", text
 )
 replacement = f"  {key}: {rendered_value}"
 if match:
     body = match.group("body")
     body, count = re.subn(
-        rf"(?m)^[ \t]+{re.escape(key)}:\s*.*$", replacement, body, count=1
+        rf"(?m)^[ \t]+{re.escape(key)}:[ \t]*.*$", lambda _: replacement, body, count=1
     )
     if count == 0:
         if body and not body.endswith("\n"):

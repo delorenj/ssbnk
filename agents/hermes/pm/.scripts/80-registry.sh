@@ -27,6 +27,16 @@ fi
 PROJECT_PATH="$(project_repo_path)" || PROJECT_PATH=""
 PLANE_PROJECT_ID="$(cat "$ROLE_DIR/.scripts/.plane-project-id" 2>/dev/null || true)"
 
+# A named agent declares WHO it is in role.yaml (`identity:`); the post is
+# agent_id/profile. Project that declaration, validated, into the registry so
+# every reader (10-hermes-profile.sh's memory pin, flume's profile observer,
+# the SOUL composer) resolves the same personal bank. `{}` means an unnamed post.
+ROLE_IDENTITY_READER="$ROLE_DIR/.scripts/lib/role-identity.py"
+[[ -f "$ROLE_IDENTITY_READER" && ! -L "$ROLE_IDENTITY_READER" ]] \
+  || die "trusted role identity reader is unavailable: $ROLE_IDENTITY_READER"
+ROLE_IDENTITY_JSON="$(python3 -I "$ROLE_IDENTITY_READER" "$ROLE_YAML" "$AGENT_ID" "$PROFILE_NAME")" \
+  || die "role.yaml identity block is invalid"
+
 log "[80] appending to fleet registry: $REGISTRY_FILE"
 
 python3 - "$REGISTRY_FILE" "$AGENT_ID" "$REPO" "$ROLE" "$DISPLAY_NAME" \
@@ -40,10 +50,11 @@ python3 - "$REGISTRY_FILE" "$AGENT_ID" "$REPO" "$ROLE" "$DISPLAY_NAME" \
   "$HERMES_BIN" "$HERMES_AGENT_REPO" "$HERMES_RUNTIME_GIT_URL" \
   "$HERMES_RUNTIME_GIT_REF" "$HERMES_RUNTIME_GIT_SHA" "$FLEET_ENV" \
   "hermes-${AGENT_ID}-gateway.service" "hermes-${AGENT_ID}-heartbeat.timer" \
-  "$(yaml_get service_state.gateway)" "$(yaml_get service_state.heartbeat)" <<'PYEOF'
+  "$ROLE_IDENTITY_JSON" <<'PYEOF'
 import datetime
 import copy
 import errno
+import json
 import os
 import pathlib
 import re
@@ -59,7 +70,7 @@ except ImportError:
  slack_username, role_yaml, plane_ws, plane_id,
  plane_ident, hermes_bin, hermes_repo, hermes_git_url,
  hermes_git_ref, hermes_git_sha, fleet_env, gw, heartbeat,
- gateway_state, heartbeat_state) = sys.argv[1:32]
+ identity_json) = sys.argv[1:31]
 p = pathlib.Path(path)
 if p.is_symlink():
     raise SystemExit(f"refusing to update registry symlink: {p}")
@@ -154,6 +165,10 @@ existing = agents.get(agent_id, {})
 if not isinstance(existing, dict):
     raise SystemExit(f"fleet registry entry for {agent_id} must be a mapping")
 provisioned_at = existing.get("provisioned_at")
+if isinstance(provisioned_at, (datetime.datetime, datetime.date)):
+    # PyYAML reads an unquoted timestamp (how most rows are written) as a
+    # datetime; keep the original provisioning time instead of resetting it.
+    provisioned_at = provisioned_at.isoformat()
 if not isinstance(provisioned_at, str) or not provisioned_at:
     provisioned_at = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 managed = {
@@ -193,14 +208,33 @@ managed = {
     "git_sha": hermes_git_sha,
     "fleet_env": fleet_env,
   },
+  # Only the unit NAMES the handbook's systemd_lifecycle seam declares
+  # writable. The gateway/heartbeat STATE lives in role.yaml `service_state`
+  # (70-systemd.sh writes it, 99-summary.sh reads it); flume review derives the
+  # desired gateway state from the messaging declaration and reports any other
+  # systemd key on a row as `registry-retired-key`.
   "systemd": {
     "gateway_unit": gw,
     "heartbeat_timer": heartbeat,
-    "gateway_state": gateway_state,
-    "heartbeat_state": heartbeat_state,
   },
   "provisioned_at": provisioned_at,
 }
+
+# Named agent: the stable identity and its personal bank. A post (no
+# `identity:` in role.yaml) leaves both absent and keeps the compatibility
+# bank agent-<profile>; see lib/role-identity.py for the validation rules.
+try:
+    identity = json.loads(identity_json or "{}")
+except ValueError:
+    raise SystemExit("role identity reader returned invalid JSON")
+if not isinstance(identity, dict):
+    raise SystemExit("role identity reader returned a non-mapping")
+if identity:
+    managed["identity"] = identity["name"]
+    managed["hindsight"] = {
+        "write_bank": identity["write_bank"],
+        "recall_banks": list(identity["recall_banks"]),
+    }
 
 def merge_managed(current, update):
     result = copy.deepcopy(current)
@@ -212,11 +246,23 @@ def merge_managed(current, update):
     return result
 
 entry = merge_managed(existing, managed)
-# This is retired managed schema, not extension metadata.  Keeping it would
-# falsely advertise a second per-agent Bloodbank execution path.
+if not identity and isinstance(entry.get("identity"), str):
+    # role.yaml is the identity SSOT. A name it no longer declares is a stale
+    # projection; drop it together with the personal bank it implied, so the
+    # row falls back to the post's compatibility bank instead of lying.
+    prior = entry.pop("identity")
+    hindsight = entry.get("hindsight")
+    if isinstance(hindsight, dict) and hindsight.get("write_bank") == f"agent-{prior}":
+        entry.pop("hindsight", None)
+# Retired managed schema, not extension metadata. consumer_unit would falsely
+# advertise a second per-agent Bloodbank execution path; gateway_state and
+# heartbeat_state (projected 2026-08-27 to 2026-09-23) duplicate role.yaml
+# service_state under keys the handbook does not declare.
+RETIRED_SYSTEMD_KEYS = ("consumer_unit", "gateway_state", "heartbeat_state")
 systemd = entry.get("systemd")
 if isinstance(systemd, dict):
-    systemd.pop("consumer_unit", None)
+    for retired_key in RETIRED_SYSTEMD_KEYS:
+        systemd.pop(retired_key, None)
 agents[agent_id] = entry
 rendered = yaml.safe_dump(data, sort_keys=False)
 p.parent.mkdir(parents=True, exist_ok=True)
