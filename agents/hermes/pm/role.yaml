@@ -76,8 +76,9 @@ plane:
 # reads the fleet registry and routes canonical commands by target_agent_id;
 # this profile does not install its own NATS consumer or inbox bridge.
 bloodbank:
-  # Quarantine gate: discovery is safe; execution requires explicit activation.
-  enabled: false
+  # Activation gate: default on. An absent key also means enabled; set this to
+  # false (the strict YAML boolean) to quarantine the agent from dispatch.
+  enabled: true
   gateway_scope: fleet
   target_agent_id: "ssbnk-pm"
   producer: "hermes-agent:ssbnk-pm"
