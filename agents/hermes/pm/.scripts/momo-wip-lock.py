@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
-"""momo-wip-lock — shared WIP=1 driver lease so interactive Momo and the Hermes
+"""momo-wip-lock — shared board-driver lease so interactive Momo and the Hermes
 sentinel never double-drive one board (momo E2/S2.3, the coexistence gate).
+
+It serializes short board selection and transitions only. Implementation
+capacity and ticket ownership are separate: `.project.json`
+`automation.implementation.wip_limit` sets the capacity (default one), and a
+project that raises it claims each ticket per its IMPLEMENTATION-LANES.md.
+Release this driver lease before waiting on workers.
 
 Both drivers acquire the SAME advisory lease (a JSON file, conventionally
 <runtime>/wip-driver.lock) before a board-driving pass. The lease PERSISTS across
@@ -11,8 +17,8 @@ heartbeat is fresh (now - heartbeat_at < ttl); a stale lease (holder died withou
 releasing) can be stolen after it expires.
 
 Owners are free strings by convention: "momo" (interactive) or
-"hermes:<agent_id>" (the sentinel). WIP=1 is per BOARD == per runtime, so there
-is one lease file per runtime.
+"hermes:<agent_id>" (the sentinel). There is one board-driver lease per
+runtime.
 
 Protocol:
   * Driver start:  acquire <lock> <me>   -> exit 0 → drive; exit 1 → HELD, back off.

@@ -6,21 +6,15 @@ set -euo pipefail
 ROLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ROLE_YAML="$ROLE_DIR/role.yaml"
 
+# The block-scoped walker _lib.sh's yaml_get uses (lib/role-yaml.py). This
+# launcher is the gateway's ExecStart, so it calls the reader directly instead
+# of sourcing _lib.sh and its fleet environment. The regex reader it replaces
+# ended a block at the first blank line and kept trailing comments.
+ROLE_YAML_READER="$ROLE_DIR/.scripts/lib/role-yaml.py"
+[[ -f "$ROLE_YAML_READER" && ! -L "$ROLE_YAML_READER" ]] \
+  || { printf 'credential-launch: trusted role.yaml reader is unavailable\n' >&2; exit 1; }
 yaml_get() {
-  python3 - "$ROLE_YAML" "$1" <<'PYEOF'
-import re, sys
-from pathlib import Path
-text = Path(sys.argv[1]).read_text()
-parts = sys.argv[2].split(".")
-if len(parts) == 2:
-    match = re.search(
-        rf"(?m)^{re.escape(parts[0])}:[ \t]*\n((?:[ \t]+\S.*\n?)*)", text
-    )
-    text = match.group(1) if match else ""
-key = parts[-1]
-match = re.search(rf'(?m)^\s*{re.escape(key)}:\s*"?([^"\n]*)"?\s*$', text)
-print(match.group(1).strip() if match else "")
-PYEOF
+  python3 "$ROLE_YAML_READER" "$ROLE_YAML" "$1"
 }
 
 AGENT_ID="$(yaml_get agent_id)"

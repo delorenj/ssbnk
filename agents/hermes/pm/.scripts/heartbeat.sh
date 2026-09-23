@@ -46,48 +46,29 @@ FULL_RUN_COOLDOWN_SECONDS="${SENTINEL_FULL_RUN_COOLDOWN_SECONDS:-300}"
 BLOCKED_FULL_RUN_COOLDOWN_SECONDS="${SENTINEL_BLOCKED_FULL_RUN_COOLDOWN_SECONDS:-900}"
 
 
-yaml_value() {
-  python3 - "$ROLE_YAML" "$1" <<'PYEOF'
-import re, sys
-from pathlib import Path
-path, key = sys.argv[1:3]
-text = Path(path).read_text()
-m = re.search(rf'(?m)^\s*{re.escape(key)}:\s*"?([^"\n]*)"?\s*$', text)
-print(m.group(1).strip() if m else "")
-PYEOF
+# Every role.yaml read goes through lib/role-yaml.py, the block-scoped walker
+# _lib.sh's yaml_get uses. The readers it replaces matched a one-part key at ANY
+# indentation anywhere in the file, and ended a block at the first blank line.
+ROLE_YAML_READER="$ROLE_DIR/.scripts/lib/role-yaml.py"
+if [[ ! -f "$ROLE_YAML_READER" || -L "$ROLE_YAML_READER" ]]; then
+  echo "heartbeat: trusted role.yaml reader unavailable" >&2
+  exit 1
+fi
+yaml_get() {
+  python3 "$ROLE_YAML_READER" "$ROLE_YAML" "$1"
 }
 
-yaml_block_value() {
-  python3 - "$ROLE_YAML" "$1" "$2" <<'PYEOF'
-import re, sys
-from pathlib import Path
-path, block_name, key = sys.argv[1:4]
-text = Path(path).read_text()
-m = re.search(rf'(?m)^{re.escape(block_name)}:[ \t]*\n((?:[ \t]+\S.*\n?)*)', text)
-block = m.group(1) if m else ""
-me = re.search(rf'(?m)^[ \t]+{re.escape(key)}:[ \t]*([^\n#]*)', block)
-value = me.group(1).strip() if me else ""
-print(value.strip().strip('"').strip("'"))
-PYEOF
-}
-
-# True only when role.yaml has a reconcile: block with enabled: true. Block-aware
-# so an unrelated `enabled:` leaf elsewhere in the file can't flip it on.
+# True only when role.yaml's reconcile: block says enabled: true. Scoped to that
+# block, so an unrelated `enabled:` leaf elsewhere in the file can't flip it on.
 reconcile_enabled() {
-  python3 - "$ROLE_YAML" <<'PYEOF'
-import re, sys
-from pathlib import Path
-text = Path(sys.argv[1]).read_text()
-m = re.search(r'(?m)^reconcile:[ \t]*\n((?:[ \t]+\S.*\n?)*)', text)
-block = m.group(1) if m else ""
-me = re.search(r'(?m)^[ \t]+enabled:[ \t]*"?([A-Za-z]+)"?', block)
-print("true" if (me and me.group(1).lower() == "true") else "false")
-PYEOF
+  local value
+  value="$(yaml_get reconcile.enabled)"
+  if [[ "${value,,}" == "true" ]]; then printf 'true\n'; else printf 'false\n'; fi
 }
 
-AGENT_ID="$(yaml_value agent_id)"
-REPO_NAME="$(yaml_value repo)"
-PROVIDER="$(yaml_block_value ticket_provider name)"
+AGENT_ID="$(yaml_get agent_id)"
+REPO_NAME="$(yaml_get repo)"
+PROVIDER="$(yaml_get ticket_provider.name)"
 
 repo_root() {
   local dir="$ROLE_DIR"
@@ -99,7 +80,8 @@ repo_root() {
 }
 REPO_ROOT="$(repo_root)"
 cd "$REPO_ROOT"
-EXECUTION_MODE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("execution",{}).get("mode","legacy"))' "$REPO_ROOT/.project.json")"
+# A repo with no .project.json has no Krebs execution mode: it is legacy.
+EXECUTION_MODE="$(python3 -c 'import json,pathlib,sys; p=pathlib.Path(sys.argv[1]); print((json.loads(p.read_text()) if p.is_file() else {}).get("execution",{}).get("mode","legacy"))' "$REPO_ROOT/.project.json")"
 if [[ "$EXECUTION_MODE" == managed || "$EXECUTION_MODE" == shadow ]]; then
   KREBS_PLANNER_ENABLED="$(reconcile_enabled)" exec python3 "$ROLE_DIR/.scripts/managed-execution.py" "$REPO_ROOT"
 fi
@@ -170,7 +152,13 @@ if status in {"active","delegated","working"} and session:
         process_active = any(((session and session in line) or (worktree and worktree in line))
             and any(m in line for m in markers) for line in result.stdout.splitlines())
     except Exception: process_active = False
-    log_path = Path.home()/".local"/"state"/"zellij"/"sessions"/session/"zellij.log"
+    # Per-session liveness. zellij 0.44 has NO per-session log: there is one
+    # global log under /tmp/zellij-$UID/zellij-log/. The path this used to read
+    # (~/.local/state/zellij/sessions/<s>/zellij.log) never exists, so
+    # log_recent was silently always False. session-metadata.kdl IS
+    # per-session and is rewritten every serialization tick (60s default),
+    # well inside the active_max_idle window. (Found and fixed in skillex-pm.)
+    log_path = Path.home()/".cache"/"zellij"/"contract_version_1"/"session_info"/session/"session-metadata.kdl"
     log_recent = log_path.exists() and (now - log_path.stat().st_mtime) <= active_max_idle
     marker_recent = False
     last_activity = iso_epoch(state.get("last_activity_at")) or iso_epoch(state.get("updated_at"))

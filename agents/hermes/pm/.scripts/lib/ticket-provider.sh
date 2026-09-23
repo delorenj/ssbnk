@@ -14,11 +14,21 @@
 #   get_issue <issue-ref>         -> JSON {id,key,title,description,acceptance,
 #                                          state,state_type,comments:[...],
 #                                          attachments:[...]}
+#   resolve_state <normalized>    -> JSON {id,state,state_type,normalized}
+#                                    Read-only validation of a configured
+#                                    transition target; never mutates an issue.
 #   comment <issue-ref> <body>    -> prints comment id
 #   transition <issue-ref> <normalized>
 #                                 -> resolves id/human key, then moves issue; normalized in
 #                                     backlog|unstarted|started|in_review|completed|
-#                                     cancelled
+#                                     cancelled|awaiting_decision|e2e_testing|
+#                                     ready_for_documentation|needs_re_evaluation;
+#                                    needs_attention/waiting_reply and
+#                                    ready_for_e2e are aliases for
+#                                    awaiting_decision and e2e_testing.
+#                                    The four extended targets are enabled
+#                                    per role by naming their lane in
+#                                    role.yaml ticket_provider:.
 #   create_board <name> <id> <d>  -> JSON {board_id, board_url}
 #   describe_board <ws> <board_id>
 #                                 -> JSON {board_id, identifier, workspace,
@@ -158,6 +168,14 @@ tp() {
   # being invalid input, an empty value can equal a provider's missing `key`
   # field and must never become authority to read or mutate that issue.
   case "$op" in
+    resolve_state)
+      [ "$#" -eq 1 ] || { echo "tp: resolve_state requires one normalized state" >&2; return 2; }
+      if [[ "$1" =~ ^[[:space:]]*$ ]]; then
+        echo "tp: resolve_state requires one normalized state" >&2
+        return 2
+      fi
+      tp_is_valid_state "$1" || { echo "tp: invalid normalized state '$1'" >&2; return 2; }
+      ;;
     get_issue|comment|transition)
       [ "$#" -ge 1 ] || { echo "tp: $op requires a non-blank issue reference" >&2; return 2; }
       if [[ "$1" =~ ^[[:space:]]*$ ]]; then
@@ -166,6 +184,11 @@ tp() {
       fi
       ;;
   esac
+
+  if [ "$op" = transition ]; then
+    [ "$#" -ge 2 ] || { echo "tp: transition requires a normalized state" >&2; return 2; }
+    tp_is_valid_state "$2" || { echo "tp: invalid normalized state '$2'" >&2; return 2; }
+  fi
 
   local name impl
   name="$(tp_provider_name)"
@@ -189,7 +212,14 @@ tp() {
 }
 
 # Normalized states the engine reasons in. Adapters map these to provider terms.
-TP_STATES="backlog unstarted started in_review completed cancelled"
+# The six neutral states every board has, then the four optional extended
+# targets. An extended target is enabled per role: it resolves only when that
+# role's role.yaml `ticket_provider:` block names its concrete lane, and the
+# provider refuses it with "ticket_provider.<state> is required" otherwise
+# (plane.sh defaults awaiting_decision to "Needs Attention"). The last three are
+# aliases: needs_attention/waiting_reply -> awaiting_decision, ready_for_e2e ->
+# e2e_testing.
+TP_STATES="backlog unstarted started in_review completed cancelled awaiting_decision e2e_testing ready_for_documentation needs_re_evaluation needs_attention waiting_reply ready_for_e2e"
 
 tp_is_valid_state() {
   case " $TP_STATES " in

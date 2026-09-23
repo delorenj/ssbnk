@@ -8,6 +8,9 @@
 #   project: "<Project name>"    optional; scopes milestone/issue queries
 #   state_map: { in_review: "In Review", completed: "Done",
 #                cancelled: "Canceled" }   optional overrides
+#   Optional extended targets, enabled per role by naming their state:
+#     awaiting_decision, e2e_testing, ready_for_documentation,
+#     needs_re_evaluation
 #
 # Implements the contract in lib/ticket-provider.sh. All Linear access goes
 # through GraphQL so the same envelope works in unattended runs.
@@ -96,7 +99,70 @@ SM_CANCELLED="$(tp_cfg cancelled)"; SM_CANCELLED="${SM_CANCELLED:-Canceled}"
 SM_STARTED="$(tp_cfg started)"
 SM_UNSTARTED="$(tp_cfg unstarted)"
 SM_BACKLOG="$(tp_cfg backlog)"
+SM_AWAITING_DECISION="$(tp_cfg awaiting_decision)"
+SM_E2E_TESTING="$(tp_cfg e2e_testing)"
+SM_READY_FOR_DOCUMENTATION="$(tp_cfg ready_for_documentation)"
+SM_NEEDS_RE_EVALUATION="$(tp_cfg needs_re_evaluation)"
 MAX_PAGES="$(validated_uint LINEAR_MAX_PAGES "${LINEAR_MAX_PAGES:-1000}" 1 1000)"
+
+# Operator aliases -> their canonical normalized target. Aliases never own a
+# concrete lane name, so they cannot drift away from role.yaml.
+canonical_state_target() {
+  case "$1" in
+    needs_attention|waiting_reply) printf 'awaiting_decision\n' ;;
+    ready_for_e2e) printf 'e2e_testing\n' ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# Normalized state -> WANT_TYPE (Linear workflow type) and WANT_NAME (the
+# configured state name, empty = resolve by workflow type). The extended
+# targets exist only when role.yaml names their state.
+linear_state_target() {
+  case "$1" in
+    completed)  WANT_TYPE=completed; WANT_NAME="$SM_DONE" ;;
+    cancelled)  WANT_TYPE=canceled;  WANT_NAME="$SM_CANCELLED" ;;
+    in_review)  WANT_TYPE=started;   WANT_NAME="$SM_IN_REVIEW" ;;
+    started)    WANT_TYPE=started;   WANT_NAME="$SM_STARTED" ;;
+    unstarted)  WANT_TYPE=unstarted; WANT_NAME="$SM_UNSTARTED" ;;
+    backlog)    WANT_TYPE=backlog;   WANT_NAME="$SM_BACKLOG" ;;
+    awaiting_decision)       WANT_TYPE=started;   WANT_NAME="$SM_AWAITING_DECISION" ;;
+    e2e_testing)             WANT_TYPE=started;   WANT_NAME="$SM_E2E_TESTING" ;;
+    ready_for_documentation) WANT_TYPE=started;   WANT_NAME="$SM_READY_FOR_DOCUMENTATION" ;;
+    needs_re_evaluation)     WANT_TYPE=unstarted; WANT_NAME="$SM_NEEDS_RE_EVALUATION" ;;
+    *) die "invalid normalized state: $1" ;;
+  esac
+  case "$1" in
+    awaiting_decision|e2e_testing|ready_for_documentation|needs_re_evaluation)
+      [ -n "$WANT_NAME" ] || die "ticket_provider.$1 is required in role.yaml"
+      ;;
+  esac
+}
+
+# Pick exactly one state from a Linear states list on stdin (a JSON array of
+# {id,name,type}) and print {id,state,state_type,normalized}.
+pick_linear_state() {
+  WANT_TYPE="$WANT_TYPE" WANT_NAME="$WANT_NAME" WANT="$1" python3 -c 'import sys,json,os
+states=json.load(sys.stdin)
+want_t=os.environ["WANT_TYPE"]; want_n=os.environ.get("WANT_NAME","")
+if want_n:
+    candidates=[s for s in states if str(s.get("name") or "").strip().casefold()==want_n.strip().casefold()]
+    basis=f"configured name {want_n!r}"
+else:
+    candidates=[s for s in states if s.get("type")==want_t]
+    basis=f"workflow type {want_t!r}"
+if len(candidates) != 1:
+    raise SystemExit(f"linear: {basis} resolved {len(candidates)} states; exactly one is required")
+pick=candidates[0]
+actual_t=pick.get("type")
+if actual_t != want_t:
+    raise SystemExit(f"linear: configured state {want_n!r} has type {actual_t!r}, expected {want_t!r}")
+state_id=str(pick.get("id") or "")
+if not state_id:
+    raise SystemExit("linear: resolved state omitted its id")
+print(json.dumps({"id":state_id,"state":str(pick.get("name") or ""),"state_type":want_t,
+                  "normalized":os.environ["WANT"]},separators=(",",":")))'
+}
 
 # All Linear ops require the API key; fail fast and clean before any pipe.
 need_key
@@ -107,6 +173,25 @@ case "$OP" in
     gql 'query($k:String!){ teams(filter:{key:{eq:$k}}){nodes{id key name}} }' \
         "$(printf '{"k":"%s"}' "$TEAM")" \
       | python3 -c 'import sys,json; d=json.load(sys.stdin); t=(d.get("teams",{}).get("nodes") or [{}])[0]; print(json.dumps({"provider":"linear","board_id":t.get("id",""),"board_url":"https://linear.app/team/"+t.get("key",""),"identifier":t.get("key","")}))'
+    ;;
+
+  resolve_state)
+    # Read-only validation of a configured transition target against the
+    # bound team's workflow states; never mutates.
+    TARGET="$(canonical_state_target "${1:?usage: resolve_state <normalized-state>}")"
+    [ -n "$TEAM" ] || die "ticket_provider.team (Linear team key) not set in role.yaml"
+    linear_state_target "$TARGET"
+    gql 'query($k:String!){ teams(filter:{key:{eq:$k}}){nodes{id key states{nodes{id name type}}}} }' \
+        "$(printf '{"k":"%s"}' "$TEAM")" \
+      | TEAM_KEY="$TEAM" python3 -c 'import sys,json,os
+d=json.load(sys.stdin)
+teams=((d.get("teams") or {}).get("nodes")) or []
+if len(teams) != 1:
+    detail="not found" if not teams else f"ambiguous ({len(teams)} exact matches)"
+    team_key=os.environ["TEAM_KEY"]
+    raise SystemExit(f"linear: configured team {team_key!r} is {detail}")
+print(json.dumps(((teams[0].get("states") or {}).get("nodes")) or []))' \
+      | pick_linear_state "$TARGET"
     ;;
 
   active_milestone)
@@ -212,37 +297,17 @@ print(comment_id.strip())'
 
   transition)
     ID="${1:?usage: transition <id> <normalized-state>}"; TARGET="${2:?}"
-    # Map normalized -> a concrete Linear state name, then resolve its id on the team.
-    case "$TARGET" in
-      completed)  WANT_TYPE=completed; WANT_NAME="$SM_DONE" ;;
-      cancelled)  WANT_TYPE=canceled;  WANT_NAME="$SM_CANCELLED" ;;
-      in_review)  WANT_TYPE=started;   WANT_NAME="$SM_IN_REVIEW" ;;
-      started)    WANT_TYPE=started;   WANT_NAME="$SM_STARTED" ;;
-      unstarted)  WANT_TYPE=unstarted; WANT_NAME="$SM_UNSTARTED" ;;
-      backlog)    WANT_TYPE=backlog;   WANT_NAME="$SM_BACKLOG" ;;
-      *) die "invalid normalized state: $TARGET" ;;
-    esac
+    # Map normalized -> a concrete Linear state name, then resolve its id on
+    # the issue's own team.
+    TARGET="$(canonical_state_target "$TARGET")"
+    linear_state_target "$TARGET"
     STATE_ID="$(gql 'query($id:String!){ issue(id:$id){ team{ states{nodes{id name type}} } } }' \
         "$(printf '{"id":"%s"}' "$ID")" \
-      | WANT_TYPE="$WANT_TYPE" WANT_NAME="$WANT_NAME" python3 -c 'import sys,json,os
+      | python3 -c 'import sys,json
 d=json.load(sys.stdin)
-states=((d.get("issue") or {}).get("team") or {}).get("states",{}).get("nodes") or []
-want_t=os.environ["WANT_TYPE"]; want_n=os.environ.get("WANT_NAME","")
-if want_n:
-    candidates=[s for s in states if str(s.get("name") or "").strip().casefold()==want_n.strip().casefold()]
-    basis=f"configured name {want_n!r}"
-else:
-    candidates=[s for s in states if s.get("type")==want_t]
-    basis=f"workflow type {want_t!r}"
-if len(candidates) != 1:
-    raise SystemExit(f"linear: {basis} resolved {len(candidates)} states; exactly one is required")
-pick=candidates[0]
-if pick.get("type") != want_t:
-    raise SystemExit(f"linear: configured state {want_n!r} has type {pick.get('type')!r}, expected {want_t!r}")
-state_id=str(pick.get("id") or "")
-if not state_id:
-    raise SystemExit("linear: resolved state omitted its id")
-print(state_id)')"
+print(json.dumps(((d.get("issue") or {}).get("team") or {}).get("states",{}).get("nodes") or []))' \
+      | pick_linear_state "$TARGET" \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
     [ -n "$STATE_ID" ] || die "no Linear state for normalized '$TARGET'"
     gql 'mutation($id:String!,$s:String!){ issueUpdate(id:$id,input:{stateId:$s}){ success issue{id identifier state{id name type}} } }' \
         "$(python3 -c 'import json,sys; print(json.dumps({"id":sys.argv[1],"s":sys.argv[2]}))' "$ID" "$STATE_ID")" \

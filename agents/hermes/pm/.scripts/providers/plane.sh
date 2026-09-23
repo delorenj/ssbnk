@@ -10,6 +10,9 @@
 #   timezone:  <IANA timezone>       optional project calendar override
 #   state_map: { started: "In Progress", in_review: "In Review",
 #                completed: "Done", cancelled: "Cancelled" }   optional
+#   Optional extended targets, enabled per role by naming their lane:
+#     awaiting_decision (default "Needs Attention"), e2e_testing,
+#     ready_for_documentation, needs_re_evaluation
 #
 # Rate limiting: reads retry HTTP 429 up to PLANE_READ_MAX_ATTEMPTS (default 4)
 # times, sleeping the server's Retry-After capped at PLANE_429_MAX_DELAY
@@ -149,6 +152,10 @@ SM_CANCELLED="$(tp_cfg cancelled)"; SM_CANCELLED="${SM_CANCELLED:-Cancelled}"
 SM_STARTED="$(tp_cfg started)"
 SM_UNSTARTED="$(tp_cfg unstarted)"
 SM_BACKLOG="$(tp_cfg backlog)"
+SM_AWAITING_DECISION="$(tp_cfg awaiting_decision)"; SM_AWAITING_DECISION="${SM_AWAITING_DECISION:-Needs Attention}"
+SM_E2E_TESTING="$(tp_cfg e2e_testing)"
+SM_READY_FOR_DOCUMENTATION="$(tp_cfg ready_for_documentation)"
+SM_NEEDS_RE_EVALUATION="$(tp_cfg needs_re_evaluation)"
 CALENDAR_TZ="$(pj_cfg timezone)"; [ -n "$CALENDAR_TZ" ] || CALENDAR_TZ="$(tp_cfg timezone)"
 CALENDAR_TZ="${CALENDAR_TZ:-${TICKET_PROVIDER_TIMEZONE:-${TZ:-}}}"
 API="$BASE/api/v1/workspaces/$WS"
@@ -388,21 +395,41 @@ m=active[0] if active else {}
 print(json.dumps({"id":m.get("id", ""),"name":m.get("name", ""),"state":"active" if m else "inactive"}))'
 }
 
-# Map a normalized state -> exactly one concrete Plane state id. A configured
-# name must exist in the expected group; it never falls back to another state in
-# the same group. An unnamed group is safe only when the group has one member.
-resolve_state_id() {
-  want="$1"
+# Operator aliases -> their canonical normalized target. Aliases never own a
+# concrete lane name, so they cannot drift away from role.yaml.
+canonical_state_target() {
+  case "$1" in
+    needs_attention|waiting_reply) printf 'awaiting_decision\n' ;;
+    ready_for_e2e) printf 'e2e_testing\n' ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# Map a normalized state -> exactly one concrete Plane state, printed as JSON
+# {id,state,state_type,normalized}. A configured name must exist in the
+# expected group; it never falls back to another state in the same group. An
+# unnamed group is safe only when the group has one member. The extended
+# targets exist only when role.yaml names their lane.
+resolve_state_target() {
+  want="$(canonical_state_target "$1")"
   [ -n "$PROJ" ] || die "ticket_provider.project not set"
   case "$want" in
-    awaiting_decision|needs_attention) grp=started; nm="Needs Attention" ;;
     completed) grp=completed; nm="$SM_DONE" ;;
     cancelled) grp=cancelled; nm="$SM_CANCELLED" ;;
     in_review) grp=started;   nm="$SM_IN_REVIEW" ;;
     started)   grp=started;   nm="$SM_STARTED" ;;
     unstarted) grp=unstarted; nm="$SM_UNSTARTED" ;;
     backlog)   grp=backlog;   nm="$SM_BACKLOG" ;;
+    awaiting_decision)       grp=started;   nm="$SM_AWAITING_DECISION" ;;
+    e2e_testing)             grp=started;   nm="$SM_E2E_TESTING" ;;
+    ready_for_documentation) grp=started;   nm="$SM_READY_FOR_DOCUMENTATION" ;;
+    needs_re_evaluation)     grp=unstarted; nm="$SM_NEEDS_RE_EVALUATION" ;;
     *) die "invalid normalized state: $want" ;;
+  esac
+  case "$want" in
+    awaiting_decision|e2e_testing|ready_for_documentation|needs_re_evaluation)
+      [ -n "$nm" ] || die "ticket_provider.$want is required in role.yaml"
+      ;;
   esac
   api_all "projects/$PROJ/states/" | GRP="$grp" NM="$nm" WANT="$want" python3 -c 'import sys,json,os
 d=json.load(sys.stdin); rows=d if isinstance(d,list) else d.get("results", []) if isinstance(d,dict) else []
@@ -420,7 +447,15 @@ else:
 state_id=str(candidates[0].get("id") or "")
 if not state_id:
     raise SystemExit(f"plane: resolved Plane state for normalized {want!r} has no id")
-print(state_id)'
+print(json.dumps({"id":state_id,"state":str(candidates[0].get("name") or ""),
+                  "state_type":str(candidates[0].get("group") or ""),"normalized":want},
+                 separators=(",",":")))'
+}
+
+resolve_state_id() {
+  resolved_state="$(resolve_state_target "$1")" || return $?
+  printf '%s' "$resolved_state" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'
 }
 
 # All Plane ops except the explicit-workspace read below require the bound
@@ -443,6 +478,12 @@ except Exception: print("")')"
   active_milestone)
     [ -n "$PROJ" ] || die "project not set"
     api_all "projects/$PROJ/cycles/" | current_cycle
+    ;;
+
+  resolve_state)
+    # Read-only validation of a configured transition target; never mutates.
+    TARGET="${1:?usage: resolve_state <normalized-state>}"
+    resolve_state_target "$TARGET"
     ;;
 
   list_issues)

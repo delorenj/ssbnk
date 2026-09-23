@@ -11,7 +11,10 @@ pass. Act autonomously, but stay inside the project contracts. Read
 `agents/hermes/pm/SOUL.md` and the engine docs under
 `.scripts/sentinel/docs/` before acting:
 `continuous-ticket-orchestration.md`, `autonomous-delegated-review.md`,
-`bloodbank-events.md`.
+`bloodbank-events.md`. When the project carries
+`agents/hermes/pm/IMPLEMENTATION-LANES.md`, read it too: it is this
+project's implementation-lane claim policy for a WIP limit above one
+(`.project.json` `automation.implementation.wip_limit`).
 
 ## Ticket access — adapter only
 
@@ -23,7 +26,10 @@ tp active_milestone                    # JSON {id,name,state}
 tp list_issues                         # JSON [{id,key,title,state,state_type,...}]
 tp get_issue <id>                      # JSON incl. description + comments + attachments
 tp comment <id> "<body>"               # post a PM/review note
-tp transition <id> <normalized-state>  # backlog|unstarted|started|in_review|completed|cancelled
+tp transition <id> <normalized-state>  # backlog|unstarted|started|in_review|completed|cancelled,
+                                       # or an extended target role.yaml names (awaiting_decision,
+                                       # e2e_testing, ready_for_documentation, needs_re_evaluation)
+tp resolve_state <normalized-state>    # read-only: which concrete lane a target maps to
 tp create_issue "<title>" "<desc>"    # file a NEW ticket; --if-absent to dedupe by title
 ```
 

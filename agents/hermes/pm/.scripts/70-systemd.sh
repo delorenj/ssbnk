@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Install systemd --user units: profile gateway and fused heartbeat timer
-# (board-reconciliation sentinel pass).
+# Install the one systemd --user unit an agent has: its profile gateway. Any
+# retired per-agent heartbeat timer/service found on the host is removed.
 # shellcheck source=_lib.sh
 source "$(dirname "$0")/_lib.sh"
 load_role_env
@@ -75,18 +75,13 @@ systemd_exec_value() {
     || die "systemd ExecStart value validation failed"
 }
 GW_DESCRIPTION="$(systemd_scalar "Hermes Gateway — $DISPLAY_NAME")"
-HB_DESCRIPTION="$(systemd_scalar "Hermes Heartbeat (reconcile) — $DISPLAY_NAME")"
-TIMER_DESCRIPTION="$(systemd_scalar "Heartbeat (reconcile) for $AGENT_ID")"
 ENV_HERMES_HOME="$(systemd_environment HERMES_HOME "$PROFILE_HOME")"
 ENV_HERMES_BIN="$(systemd_environment HERMES_BIN "$HERMES_BIN")"
 ENV_CODEX_HOME="$(systemd_environment CODEX_HOME "$CODEX_HOME")"
 ENV_TERMINAL_CWD="$(systemd_environment TERMINAL_CWD "$REPO_ROOT")"
-WORKING_DIRECTORY="$(systemd_scalar "$REPO_ROOT")"
 RUNTIME_ENV_FILE="$(systemd_scalar "-$RUNTIME/.env")"
 GW_LOG_OUTPUT="$(systemd_scalar "append:$RUNTIME/logs/gateway.systemd.log")"
-HB_LOG_OUTPUT="$(systemd_scalar "append:$RUNTIME/logs/heartbeat.log")"
 GW_EXEC_START="$(systemd_exec_value "$ROLE_DIR/.scripts/credential-launch.sh")"
-HB_EXEC_START="$GW_EXEC_START"
 
 # A model credential may be supplied through systemd's encrypted credential
 # store. Chat-channel values are never materialized here: Hermes resolves their
@@ -94,14 +89,12 @@ HB_EXEC_START="$GW_EXEC_START"
 CREDENTIAL_DIR="${HERMES_SYSTEMD_CREDENTIAL_DIR:-$HOME/.config/hermes-agent/credentials}"
 MODEL_CREDENTIAL="$CREDENTIAL_DIR/${AGENT_ID}-model-api-key.cred"
 GW_CREDENTIAL_LINES=""
-HB_CREDENTIAL_LINES=""
 if [[ -f "$MODEL_CREDENTIAL" ]]; then
   [[ -n "$(yaml_get model.key_env)" ]] \
     || die "encrypted model credential exists but model.key_env is blank in role.yaml"
   command -v systemd-creds >/dev/null 2>&1 \
     || die "encrypted model credential exists but systemd-creds is unavailable"
   GW_CREDENTIAL_LINES="${GW_CREDENTIAL_LINES}${GW_CREDENTIAL_LINES:+$'\n'}LoadCredentialEncrypted=$(systemd_value "model_api_key:$MODEL_CREDENTIAL")"
-  HB_CREDENTIAL_LINES="LoadCredentialEncrypted=$(systemd_value "model_api_key:$MODEL_CREDENTIAL")"
 fi
 
 # A gateway is eligible only when at least one channel identity is verified AND
@@ -305,7 +298,8 @@ if systemd_user_available; then
   fi
 else
   warn "    systemd --user not available; units installed at $SYS_DIR but not enabled"
-  yaml_upsert_block_value service_state heartbeat installed
+  # The heartbeat stays `retired` (recorded above): there is no heartbeat unit
+  # to install, with or without a user manager.
   if [[ $gateway_ready -eq 1 ]]; then
     yaml_upsert_block_value service_state gateway installed
   else

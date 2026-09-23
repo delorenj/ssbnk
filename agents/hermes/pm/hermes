@@ -35,7 +35,7 @@ PROFILE_NAME="${HERMES_PROFILE_NAME:-ssbnk-pm}"
 # detached the profile on the first in-agent write (Hermes' atomic write does
 # os.replace, which swaps the symlink for a regular file) and left no way to
 # override anything. Edit config.delta.yaml, then render.
-# Provision it with: pj migrate hermes.runtime-singleton
+# Provision it with: flume remediate hermes.runtime-singleton
 HERMES_HOME="$FLEET_HOME/profiles/$PROFILE_NAME"
 if ! REPO_ROOT="$(git -C "$ROLE_DIR" rev-parse --show-toplevel 2>/dev/null)"; then
   REPO_ROOT="$ROLE_DIR"
@@ -87,14 +87,14 @@ fi
 
 if [[ ! -d "$HERMES_HOME" ]]; then
   echo "hermes: profile not provisioned at $HERMES_HOME" >&2
-  echo "  fix: pj migrate hermes.runtime-singleton" >&2
+  echo "  fix: flume remediate hermes.runtime-singleton" >&2
   exit 1
 fi
 
 if [[ -L "$HERMES_HOME" ]]; then
   echo "hermes: $HERMES_HOME is a symlink; the profile dir must be a REAL dir" >&2
   echo "  (a symlink breaks profile-name resolution and shared fleet auth)" >&2
-  echo "  fix: pj migrate hermes.runtime-singleton" >&2
+  echo "  fix: flume remediate hermes.runtime-singleton" >&2
   exit 1
 fi
 

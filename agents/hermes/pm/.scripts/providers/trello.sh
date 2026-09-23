@@ -54,16 +54,33 @@ PY
 }
 
 BOARD="$(pj_cfg board_id)"; [ -n "$BOARD" ] || BOARD="$(tp_cfg board)"
-# Normalized -> Trello list name (overridable via role.yaml state_map keys).
-list_name_for() {
+# Operator aliases -> their canonical normalized target. Aliases never own a
+# concrete lane name, so they cannot drift away from role.yaml.
+canonical_state_target() {
   case "$1" in
+    needs_attention|waiting_reply) printf 'awaiting_decision\n' ;;
+    ready_for_e2e) printf 'e2e_testing\n' ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# Normalized -> Trello list name (overridable via role.yaml state_map keys).
+# The extended targets exist only when role.yaml names their list.
+list_name_for() {
+  want="$(canonical_state_target "$1")"
+  case "$want" in
     backlog)   v="$(tp_cfg backlog)";   printf '%s' "${v:-Backlog}" ;;
     unstarted) v="$(tp_cfg unstarted)"; printf '%s' "${v:-To Do}" ;;
     started)   v="$(tp_cfg started)";   printf '%s' "${v:-In Progress}" ;;
     in_review) v="$(tp_cfg in_review)"; printf '%s' "${v:-Review}" ;;
     completed) v="$(tp_cfg completed)"; printf '%s' "${v:-Done}" ;;
     cancelled) v="$(tp_cfg cancelled)"; printf '%s' "${v:-Cancelled}" ;;
-    *) die "invalid normalized state: $1" ;;
+    awaiting_decision|e2e_testing|ready_for_documentation|needs_re_evaluation)
+      v="$(tp_cfg "$want")"
+      [ -n "$v" ] || die "ticket_provider.$want is required in role.yaml"
+      printf '%s' "$v"
+      ;;
+    *) die "invalid normalized state: $want" ;;
   esac
 }
 
@@ -76,11 +93,14 @@ api() {
   curl -fsS -X "$method" "$url"
 }
 
-# Resolve a list id on the board by (normalized) state.
-list_id_for() {
+# Resolve a normalized state to exactly one list on the board, printed as JSON
+# {id,state,state_type,normalized}. Trello has no workflow-group primitive, so
+# exact configured list-name uniqueness is the enforceable boundary.
+resolve_state_target() {
   [ -n "$BOARD" ] || die "ticket_provider.board not set"
-  want="$(list_name_for "$1")"
-  api GET "boards/$BOARD/lists" | NM="$want" python3 -c 'import sys,json,os
+  normalized="$(canonical_state_target "$1")"
+  want="$(list_name_for "$normalized")"
+  api GET "boards/$BOARD/lists" | NM="$want" WANT="$normalized" python3 -c 'import sys,json,os
 rows=json.load(sys.stdin); nm=os.environ["NM"].strip().casefold()
 matches=[row for row in rows if str(row.get("name") or "").strip().casefold()==nm]
 if len(matches) != 1:
@@ -88,7 +108,15 @@ if len(matches) != 1:
 list_id=str(matches[0].get("id") or "")
 if not list_id:
     raise SystemExit("trello: resolved list omitted its id")
-print(list_id)'
+state=str(matches[0].get("name") or "")
+print(json.dumps({"id":list_id,"state":state,"state_type":state.lower().replace(" ","_"),
+                  "normalized":os.environ["WANT"]},separators=(",",":")))'
+}
+
+# Resolve a list id on the board by (normalized) state.
+list_id_for() {
+  resolved_list="$(resolve_state_target "$1")" || return $?
+  printf '%s' "$resolved_list" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'
 }
 
 # All Trello ops require credentials; fail fast and clean before any pipe.
@@ -99,6 +127,12 @@ case "$OP" in
     [ -n "$BOARD" ] || die "board not set (run 42-ticket-provider.sh)"
     api GET "boards/$BOARD" "fields=name,url" | python3 -c 'import sys,json
 b=json.load(sys.stdin); print(json.dumps({"provider":"trello","board_id":b.get("id",""),"board_url":b.get("url","")}))'
+    ;;
+
+  resolve_state)
+    # Read-only validation of a configured transition target; never mutates.
+    TARGET="${1:?usage: resolve_state <normalized-state>}"
+    resolve_state_target "$TARGET"
     ;;
 
   active_milestone)
