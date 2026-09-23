@@ -12,34 +12,22 @@ _.path = [".mise/scripts", "agents/hermes/pm"]
 # i.e. All linked agent files MUST be siblings at
 # any given level of nesting.
 [[hooks.enter]]
-script = "'{{config_root}}/.mise/scripts/link-agentfiles.sh' '{{config_root}}'"
+run = "'{{config_root}}/.mise/scripts/link-agentfiles.sh' '{{config_root}}'"
 [[hooks.enter]]
-script = "python3 '{{config_root}}/.mise/scripts/provision-packs.py' --root '{{config_root}}'"
-[[hooks.enter]]
-script = "python3 '{{config_root}}/.mise/scripts/sync-skills.py' --scope project --root '{{config_root}}'"
-[[hooks.enter]]
-script = "'{{config_root}}/.mise/scripts/materialize-env.sh'"
+run = "'{{config_root}}/.mise/scripts/materialize-env.sh'"
 
 [[watch_files]]
 patterns = ["AGENTS.md"]
 task = "link:agentfiles"
-
-[[watch_files]]
-patterns = [".agents/skills.json"]
-task = "skills:sync"
 
 [tasks."link:agentfiles"]
 description = "Symlink all agent files to AGENTS.md"
 run = "'{{config_root}}/.mise/scripts/link-agentfiles.sh' '{{config_root}}'"
 
 [tasks."skills:sync"]
-description = "Sync skills from manifest to local CLI dirs"
-depends = ["skills:provision:packs"]
-run = "python3 '{{config_root}}/.mise/scripts/sync-skills.py' --scope project --root '{{config_root}}'"
-
-[tasks."skills:provision:packs"]
-description = "Provision every Skillex pack declared in .agents/skills.json"
-run = "python3 '{{config_root}}/.mise/scripts/provision-packs.py' --root '{{config_root}}'"
+description = "Reconcile this project's selected skills"
+tools = { "npm:@delorenj/skillex" = { version = "0.1.1", allow_low_downloads = true }, node = "24" }
+run = "skillex sync --scope project --project '{{config_root}}'"
 
 # >>> mise-versioning >>>  (managed block — do not edit by hand; re-run init to update)
 [tasks."version"]
