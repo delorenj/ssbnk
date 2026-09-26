@@ -200,6 +200,17 @@ elif [[ ! -f "$PROFILE_MEM_CFG" ]]; then
   chmod 600 "$PROFILE_MEM_CFG"
 fi
 
+# Name the bank template the identity bank starts from (config.toml
+# [hindsight] agent_bank_template). The Hindsight provider imports it the
+# first time the agent's session touches a bank with no mission, and never
+# over one that already has a mission, so a travelling named agent keeps what
+# its bank already knows. Without it a new agent bank extracts unsteered.
+if [[ -f "$PROFILE_RENDERER" ]]; then
+  python3 "$PROFILE_RENDERER" memory-template --profile "$PROFILE_NAME" >/dev/null \
+    && log "    recorded identity bank template (applied on the agent's first session)" \
+    || warn "    could not record the identity bank template; run hermes-profile-config.py memory-template --profile $PROFILE_NAME"
+fi
+
 # Render config.yaml from base + delta when the renderer is available. Without
 # it the profile still boots (Hermes reads whatever config.yaml exists), but it
 # is not yet under inheritance and `pj audit` will say so.

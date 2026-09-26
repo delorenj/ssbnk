@@ -62,3 +62,13 @@ runtime_repo_owner = ""
 # Plane instance base URL and workspace slug (one project per agent).
 base = "https://plane.delo.sh"
 workspace = "33god"
+
+[hindsight]
+# Bank-template manifest a new agent's identity bank starts from (retain /
+# reflect / observations missions, entity labels, mental models, directives).
+# Hire step 10 records it in the desk's hindsight/config.json as
+# `bank_template` (`hermes-profile-config.py memory-template`), and the Hermes
+# Hindsight provider imports it once: only into a bank that has no mission yet,
+# never over one that does. Empty = new identity banks start unsteered.
+# ~ and $VARS are expanded.
+agent_bank_template = ""
