@@ -37,7 +37,6 @@ hermes_git_ref = "main"
 hermes_git_sha = "0408fec7a153e6c32c064acd2b8053917f1525f1"
 fleet_env = "~/.hermes/fleet.env"
 registry_file = "~/.hermes/agents-registry.yaml"
-canonical_skills_dir = "/home/delorenj/.agents/skills"
 
 [github]
 runtime_repo_owner = "delorenj"
