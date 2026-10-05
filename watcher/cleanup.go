@@ -263,7 +263,10 @@ func buildCleanupPlan(options CleanupOptions) (cleanupPlan, error) {
 		return cleanupPlan{}, err
 	}
 	metadataByFilename := make(map[string][]metadataFile)
-	preserved := make(map[string]bool)
+	preserved, err := protectedUploadOutputs(options.DataDir)
+	if err != nil {
+		return cleanupPlan{}, err
+	}
 	for _, record := range rootMetadata {
 		metadataByFilename[record.Metadata.Filename] = append(metadataByFilename[record.Metadata.Filename], record)
 		preserved[record.Metadata.Filename] = preserved[record.Metadata.Filename] || record.Metadata.Preserve

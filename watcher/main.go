@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
@@ -12,14 +13,15 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
 )
 
@@ -42,6 +44,7 @@ type Config struct {
 	DataDir       string
 	StateDir      string
 	BaseURL       string
+	UploadSpool   *UploadSpool
 }
 
 const (
@@ -52,89 +55,32 @@ const (
 )
 
 func serve(config Config) error {
-	log.Printf("Starting ssbnk watcher...")
-	log.Printf("Screenshot directory: %s", config.ScreenshotDir)
-	log.Printf("Video watch directory: %s", config.ScreencastDir)
-	log.Printf("Data directory: %s", config.DataDir)
-	log.Printf("State directory: %s", stateDirForConfig(config))
-	log.Printf("Base URL: %s", config.BaseURL)
-
-	// Ensure directories exist
-	if err := os.MkdirAll(filepath.Join(config.DataDir, "hosted"), 0755); err != nil {
-		return fmt.Errorf("create hosted directory: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Join(config.DataDir, "metadata"), 0755); err != nil {
-		return fmt.Errorf("create metadata directory: %w", err)
-	}
-
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return fmt.Errorf("create watcher: %w", err)
-	}
-	defer watcher.Close()
-
-	// Start watching
-	go func() {
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-				// For screenshots, process on create/rename in a goroutine so the watcher loop never blocks.
-				if (event.Op&fsnotify.Create == fsnotify.Create || event.Op&fsnotify.Rename == fsnotify.Rename) && isImageFile(event.Name) {
-					log.Printf("New screenshot detected: %s", event.Name)
-					go func(path string) {
-						// Small delay to ensure file is fully written
-						time.Sleep(100 * time.Millisecond)
-						if err := processScreenshot(path, config); err != nil {
-							log.Printf("Error processing screenshot: %v", err)
-						}
-					}(event.Name)
-				}
-
-				// For videos, we need to track them and wait for write completion
-				if (event.Op&fsnotify.Create == fsnotify.Create || event.Op&fsnotify.Rename == fsnotify.Rename) && isVideoFile(event.Name) {
-					log.Printf("Video recording started: %s", event.Name)
-					// Track this video file for completion
-					go trackVideoFile(event.Name, config)
-				}
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				log.Printf("Watcher error: %v", err)
-			}
+	for _, name := range []string{"hosted", "metadata", "spool"} {
+		if err := os.MkdirAll(filepath.Join(config.DataDir, name), 0755); err != nil {
+			return fmt.Errorf("create %s directory: %w", name, err)
 		}
-	}()
-
-	err = watcher.Add(config.ScreenshotDir)
-	if err != nil {
-		return fmt.Errorf("watch screenshot directory: %w", err)
 	}
-
-	err = watcher.Add(config.ScreencastDir)
-	if err != nil {
-		return fmt.Errorf("watch screencast directory: %w", err)
-	}
-
-	log.Printf("Watching for screenshots in %s", config.ScreenshotDir)
-	log.Printf("Watching for videos in %s", config.ScreencastDir)
-
-	// Start HTTP server for API endpoints
-	serverErrors := make(chan error, 1)
-	go func() {
-		serverErrors <- startAPIServer(config)
-	}()
-
-	// Start memory logger
-	go logMemoryUsage()
-
-	return <-serverErrors
+	return startAPIServer(config)
 }
 
 func startAPIServer(config Config) error {
+	limits, err := uploadLimitsFromEnv()
+	if err != nil {
+		return err
+	}
+	spool, err := openUploadSpool(config, limits)
+	if err != nil {
+		return fmt.Errorf("initialize upload spool: %w", err)
+	}
+	defer spool.Close()
+	config.UploadSpool = spool
+	spool.Start()
 	mux := http.NewServeMux()
+	mux.Handle("/api/uploads", spool)
+	mux.Handle("/api/uploads/", spool)
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		writeUploadError(w, uploadError("NOT_FOUND", http.StatusNotFound, "unknown API route or version", false), nil)
+	})
 
 	// API endpoints
 	mux.HandleFunc("/api/screenshots", func(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +142,23 @@ func startAPIServer(config Config) error {
 
 	port := getEnv("SSBNK_API_PORT", "80")
 	log.Printf("Starting server on port %s (static files + API)", port)
-	if err := http.ListenAndServe(":"+port, handler); err != nil {
+	server := &http.Server{
+		Addr: ":" + port, Handler: handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    16 << 10,
+	}
+	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-shutdownContext.Done()
+		spool.cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	}()
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("serve HTTP: %w", err)
 	}
 	return nil
@@ -209,12 +171,12 @@ func withHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Upload-Key, X-API-Key")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, PUT, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Upload-Key, X-API-Key, Upload-Offset, Upload-Chunk-SHA256")
 
 		w.Header().Set("Cache-Control", cacheControlForPath(r.URL.Path))
 
-		if r.Method == "OPTIONS" {
+		if r.Method == "OPTIONS" && !strings.HasPrefix(r.URL.Path, "/api/uploads") {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -551,6 +513,21 @@ func handleUploadWithLimits(w http.ResponseWriter, r *http.Request, config Confi
 		http.Error(w, "Only PNG, JPEG, GIF, and WebP images are allowed", http.StatusUnsupportedMediaType)
 		return
 	}
+
+	if config.UploadSpool != nil {
+		release, err := config.UploadSpool.reserveTransient(maxFileBytes)
+		if err != nil {
+			writeUploadError(w, err, nil)
+			return
+		}
+		defer release()
+	}
+	releasePublication, err := acquireCleanupLock(config.DataDir)
+	if err != nil {
+		http.Error(w, "Hosted publication is busy", http.StatusServiceUnavailable)
+		return
+	}
+	defer releasePublication()
 
 	// Generate filename with timestamp
 	now := time.Now()

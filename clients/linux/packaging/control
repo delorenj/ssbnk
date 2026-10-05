@@ -1,0 +1,8 @@
+Package: ssbnk-client
+Version: 0.1.0
+Architecture: all
+Maintainer: SSBNK <ssbnk@delo.sh>
+Depends: python3 (>= 3.12), python3-gi, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1, ca-certificates, xdg-utils, wl-clipboard, xclip
+Recommends: gnome-shell (>= 46)
+Description: Durable screenshot and recording tray client for SSBNK
+ HTTP v2 capture delivery, native settings, and originating-session clipboard integration.

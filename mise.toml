@@ -62,7 +62,7 @@ run = "docker build --build-arg REVISION=$(git rev-parse HEAD) --build-arg VERSI
 
 [tasks.test]
 description = "Run all source and frontend checks"
-depends = ["test:go", "test:ui", "test:macos"]
+depends = ["test:go", "test:ui", "test:macos", "test:linux", "lint:linux", "typecheck:linux"]
 
 [tasks."test:go"]
 description = "Run Go race tests, vet, and reachable-vulnerability analysis"
@@ -79,11 +79,37 @@ run = "cd clients/macos && swift test"
 
 [tasks."build:macos"]
 description = "Build the native macOS menu-bar client for Apple Silicon"
+tools = { swift = "6.3.3" }
 run = "cd clients/macos && swift build -c release --arch arm64"
 
 [tasks."package:macos"]
 description = "Test, Developer-ID sign, and assemble the native macOS client DMG"
+tools = { swift = "6.3.3" }
 run = "clients/macos/scripts/build-dmg.sh"
+
+[tasks."test:linux"]
+description = "Run durable Linux core and adapter counterexamples without GI on the worker"
+run = "PYTHONPATH=clients/linux/src python3 -m unittest discover -s clients/linux/tests -p 'test_*.py'"
+
+[tasks."lint:linux"]
+description = "Check Linux client and packaging source with pinned Ruff"
+run = "uvx ruff@0.15.7 check clients/linux"
+
+[tasks."typecheck:linux"]
+description = "Strictly type-check the standard-library core; GI remains a distro desktop boundary"
+run = "uvx mypy@1.19.1 --config-file clients/linux/pyproject.toml clients/linux/src/ssbnk_client/config.py clients/linux/src/ssbnk_client/store.py clients/linux/src/ssbnk_client/scanner.py clients/linux/src/ssbnk_client/upload.py clients/linux/src/ssbnk_client/worker.py clients/linux/src/ssbnk_client/credentials.py clients/linux/src/ssbnk_client/session.py clients/linux/src/ssbnk_client/clipboard.py clients/linux/src/ssbnk_client/autostart.py"
+
+[tasks."package:linux:deb"]
+description = "Build Debian artifact; requires distro dpkg-deb and Python 3.12+"
+run = "python3 clients/linux/scripts/package.py deb"
+
+[tasks."package:linux:arch"]
+description = "Build Arch artifact with makepkg on a disposable Arch qualification system"
+run = "python3 clients/linux/scripts/package.py arch"
+
+[tasks."package:linux:gnome"]
+description = "Pack GNOME 46/50 companion using distro gnome-extensions tooling"
+run = "python3 clients/linux/scripts/package.py gnome"
 
 [tasks."dev:init"]
 description = "Create disposable local bind-mount directories"

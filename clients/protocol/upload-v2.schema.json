@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ssbnk.delo.sh/protocol/upload-v2.schema.json",
+  "title": "SSBNK upload protocol v2",
+  "oneOf": [
+    {"allOf": [{"$ref": "#/$defs/descriptor"}, {"not": {"required": ["uuid"]}}]},
+    {"$ref": "#/$defs/receipt"},
+    {"$ref": "#/$defs/capabilities"},
+    {"$ref": "#/$defs/errorResponse"}
+  ],
+  "$defs": {
+    "descriptor": {
+      "type": "object",
+      "required": ["version", "original_name", "kind", "size", "sha256", "capture_time", "profile"],
+      "properties": {
+        "version": {"const": 2},
+        "original_name": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^/\\\\\u0000\r\n]+$"},
+        "kind": {"enum": ["image", "video"]},
+        "size": {"type": "integer", "minimum": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "capture_time": {"type": "string", "format": "date-time"},
+        "profile": {"enum": ["original", "gif-30s-10fps-640"]}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "image"}}}, "then": {"properties": {"profile": {"const": "original"}}}},
+        {"if": {"properties": {"kind": {"const": "video"}}}, "then": {"properties": {"profile": {"const": "gif-30s-10fps-640"}}}}
+      ]
+    },
+    "failure": {
+      "type": "object", "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "retryable": {"type": "boolean"}}
+    },
+    "result": {
+      "type": "object", "additionalProperties": false,
+      "required": ["url", "filename", "metadata_id", "media_type", "size", "sha256", "availability"],
+      "properties": {
+        "url": {"type": "string", "format": "uri"}, "filename": {"type": "string"},
+        "metadata_id": {"type": "string", "format": "uuid"}, "media_type": {"enum": ["image/png", "image/jpeg", "image/gif", "image/webp"]},
+        "size": {"type": "integer", "minimum": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "availability": {"enum": ["available", "expired"]}
+      }
+    },
+    "receipt": {
+      "allOf": [{"$ref": "#/$defs/descriptor"}],
+      "type": "object",
+      "required": ["uuid", "offset", "state", "attempt", "created_at", "progress_at"],
+      "properties": {
+        "uuid": {"type": "string", "format": "uuid"}, "offset": {"type": "integer", "minimum": 0},
+        "state": {"enum": ["receiving", "verifying", "queued", "processing", "ready", "failed", "expired"]},
+        "attempt": {"type": "integer", "minimum": 1, "maximum": 3},
+        "created_at": {"type": "string", "format": "date-time"}, "progress_at": {"type": "string", "format": "date-time"},
+        "accepted_at": {"type": "string", "format": "date-time"}, "first_failure_at": {"type": "string", "format": "date-time"}, "expires_at": {"type": "string", "format": "date-time"},
+        "error": {"$ref": "#/$defs/failure"}, "result": {"$ref": "#/$defs/result"}
+      },
+      "if": {"properties": {"state": {"const": "ready"}}},
+      "then": {"required": ["result", "accepted_at"]},
+      "else": {"not": {"required": ["result"]}}
+    },
+    "capabilities": {
+      "type": "object", "required": ["version", "kinds", "profiles", "limits", "processing_ready", "expiry"],
+      "properties": {
+        "version": {"const": 2}, "kinds": {"const": ["image", "video"]},
+        "profiles": {"const": {"image": "original", "video": "gif-30s-10fps-640"}},
+        "limits": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}},
+        "processing_ready": {"type": "boolean"}, "expiry": {"type": "object"}
+      }
+    },
+    "errorResponse": {
+      "type": "object", "required": ["version", "error"],
+      "properties": {"version": {"const": 2}, "error": {"$ref": "#/$defs/failure"}, "receipt": {"$ref": "#/$defs/receipt"}}
+    }
+  }
+}

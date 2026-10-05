@@ -276,7 +276,34 @@ final class TestClock {
 func configuration(captureDirectory: URL) -> ClientConfiguration {
     var configuration = ClientConfiguration.defaults(homeDirectory: captureDirectory.deletingLastPathComponent())
     configuration.captureDirectory = captureDirectory.path
+    configuration.screenshotDirectory = captureDirectory.path
+    configuration.recordingDirectory = captureDirectory.path
+    configuration.credentialReference = "op://DeLoSecrets/test/credential"
     return configuration
+}
+
+struct TestCredentialProvider: UploadCredentialProviding {
+    func resolve(reference: String) async throws -> String { "test-credential" }
+}
+final class ReadyUploadStub: CaptureUploading {
+    var state: String
+    var calls = 0
+    init(state: String = "ready") { self.state = state }
+    func capabilities(origin: String, credential: String) async throws -> UploadCapabilities {
+        try JSONDecoder().decode(UploadCapabilities.self, from: Data("{\"version\":2,\"processing_ready\":true,\"limits\":{\"default_chunk_bytes\":1048576}}".utf8))
+    }
+    func advance(_ transfer: QueuedTransfer, credential: String) async throws -> UploadReceipt {
+        calls += 1
+        let id = transfer.id.uuidString.lowercased()
+        let filename = id + (transfer.kind == .image ? ".png" : ".gif")
+        let result = state == "ready" ? UploadResult(url: transfer.pinnedOrigin! + "/" + filename, filename: filename,
+            metadataID: id, mediaType: transfer.kind == .image ? "image/png" : "image/gif", size: Int64(transfer.identity.size),
+            sha256: transfer.stagedSHA256!, availability: "available") : nil
+        return UploadReceipt(version: 2, uuid: id, kind: transfer.kind, profile: transfer.uploadProfile,
+                             size: Int64(transfer.identity.size), sha256: transfer.stagedSHA256!, offset: Int64(transfer.identity.size),
+                             state: state, attempt: 1, acceptedAt: "2026-10-05T00:00:00Z", error: nil, result: result)
+    }
+    func retry(_ transfer: QueuedTransfer, credential: String) async throws -> UploadReceipt { try await advance(transfer, credential: credential) }
 }
 
 func captureFile(at url: URL, kind: MediaKind) async throws -> CaptureFile {

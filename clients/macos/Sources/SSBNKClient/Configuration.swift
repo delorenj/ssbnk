@@ -25,6 +25,8 @@ enum ConfigurationIssue: Error, Equatable, CustomStringConvertible {
     case invalidSSHDestination
     case invalidPublicHealthURL
     case invalidRemoteDirectory(MediaKind)
+    case invalidVaultReference
+    case unsupportedVersion
 
     var description: String {
         switch self {
@@ -35,7 +37,11 @@ enum ConfigurationIssue: Error, Equatable, CustomStringConvertible {
         case .invalidPublicHealthURL:
             return "Enter an HTTPS health URL."
         case .invalidRemoteDirectory(let kind):
-            return "Enter a safe absolute server directory for \(kind.label.lowercased())."
+            return "Choose an existing local folder for \(kind.label.lowercased())."
+        case .invalidVaultReference:
+            return "Enter a DeLoSecrets op:// credential reference."
+        case .unsupportedVersion:
+            return "Unsupported configuration version; repair saved settings."
         }
     }
 }
@@ -46,6 +52,28 @@ struct ClientConfiguration: Codable, Equatable {
     var publicHealthURL: String
     var imageRemoteDirectory: String
     var videoRemoteDirectory: String
+    var screenshotDirectory: String?
+    var recordingDirectory: String?
+    var apiOrigin: String?
+    var credentialReference: String?
+    var version: Int?
+
+    var screenshotURL: URL { URL(fileURLWithPath: NSString(string: screenshotDirectory ?? captureDirectory).expandingTildeInPath, isDirectory: true).resolvingSymlinksInPath() }
+    var recordingURL: URL { URL(fileURLWithPath: NSString(string: recordingDirectory ?? captureDirectory).expandingTildeInPath, isDirectory: true).resolvingSymlinksInPath() }
+    var resolvedOrigin: String {
+        if let apiOrigin { return apiOrigin.trimmingCharacters(in: CharacterSet(charactersIn: "/")) }
+        guard var components = URLComponents(string: publicHealthURL) else { return "" }
+        components.path = ""; components.query = nil; components.fragment = nil
+        return components.string ?? ""
+    }
+
+    static func isSafeAPIOrigin(_ value: String) -> Bool {
+        guard let parts = URLComponents(string: value), let host = parts.host,
+              parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
+              parts.path.isEmpty || parts.path == "/"
+        else { return false }
+        return parts.scheme == "https" || (parts.scheme == "http" && ["localhost", "127.0.0.1", "::1"].contains(host))
+    }
 
     static func defaults(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> ClientConfiguration {
         ClientConfiguration(
@@ -56,7 +84,11 @@ struct ClientConfiguration: Codable, Equatable {
             sshDestination: "delorenj@big-chungus.burro-salmon.ts.net",
             publicHealthURL: "https://ss.delo.sh/health",
             imageRemoteDirectory: "/home/delorenj/Pictures/Screenshots",
-            videoRemoteDirectory: "/home/delorenj/Videos/Screencasts"
+            videoRemoteDirectory: "/home/delorenj/Videos/Screencasts",
+            screenshotDirectory: homeDirectory.appendingPathComponent("Pictures/Screenshots").path,
+            recordingDirectory: homeDirectory.appendingPathComponent("Videos/Screencasts").path,
+            apiOrigin: "https://ss.delo.sh",
+            version: 2
         )
     }
 
@@ -72,13 +104,13 @@ struct ClientConfiguration: Codable, Equatable {
         [
             RouteMapping(
                 kind: .image,
-                sourceDirectory: captureDirectory,
-                remoteDirectory: imageRemoteDirectory
+                sourceDirectory: screenshotDirectory ?? captureDirectory,
+                remoteDirectory: resolvedOrigin
             ),
             RouteMapping(
                 kind: .video,
-                sourceDirectory: captureDirectory,
-                remoteDirectory: videoRemoteDirectory
+                sourceDirectory: recordingDirectory ?? captureDirectory,
+                remoteDirectory: resolvedOrigin
             ),
         ]
     }
@@ -92,21 +124,10 @@ struct ClientConfiguration: Codable, Equatable {
 
     func validationIssues() -> [ConfigurationIssue] {
         var issues: [ConfigurationIssue] = []
-        if captureDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            issues.append(.captureDirectoryMissing)
-        }
-        if !Self.isSafeSSHDestination(sshDestination) {
-            issues.append(.invalidSSHDestination)
-        }
-        if !Self.isHTTPSURL(healthURL) {
-            issues.append(.invalidPublicHealthURL)
-        }
-        if !Self.isSafeRemoteDirectory(imageRemoteDirectory) {
-            issues.append(.invalidRemoteDirectory(.image))
-        }
-        if !Self.isSafeRemoteDirectory(videoRemoteDirectory) {
-            issues.append(.invalidRemoteDirectory(.video))
-        }
+        if version != nil && version != 2 { issues.append(.unsupportedVersion) }
+        if (screenshotDirectory ?? captureDirectory).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (recordingDirectory ?? captureDirectory).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append(.captureDirectoryMissing) }
+        if !Self.isSafeAPIOrigin(resolvedOrigin) { issues.append(.invalidPublicHealthURL) }
+        if credentialReference?.hasPrefix("op://DeLoSecrets/") != true || credentialReference?.contains("\n") == true { issues.append(.invalidVaultReference) }
         return issues
     }
 
@@ -160,7 +181,13 @@ final class ConfigurationStore: ConfigurationPersisting {
 
     func load() throws -> ClientConfiguration? {
         guard fileManager.fileExists(atPath: fileURL.path) else { return nil }
-        return try decoder.decode(ClientConfiguration.self, from: Data(contentsOf: fileURL))
+        var configuration = try decoder.decode(ClientConfiguration.self, from: Data(contentsOf: fileURL))
+        guard configuration.version == nil || configuration.version == 2 else { throw ConfigurationIssue.unsupportedVersion }
+        configuration.screenshotDirectory = configuration.screenshotDirectory ?? configuration.captureDirectory
+        configuration.recordingDirectory = configuration.recordingDirectory ?? configuration.captureDirectory
+        configuration.apiOrigin = configuration.resolvedOrigin
+        configuration.version = 2
+        return configuration
     }
 
     func save(_ configuration: ClientConfiguration) throws {

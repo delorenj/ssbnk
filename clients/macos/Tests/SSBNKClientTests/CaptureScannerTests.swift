@@ -45,7 +45,8 @@ struct CaptureScannerTests {
         let queue = try TransferQueue(
             stateURL: workspace.stateURL,
             outboxURL: workspace.outboxURL,
-            runner: runner
+            runner: runner,
+            uploader: ReadyUploadStub(), credentials: TestCredentialProvider()
         )
         let scanner = CaptureScanner(queue: queue, stabilityChecker: ImmediateStableChecker())
 
@@ -66,7 +67,8 @@ struct CaptureScannerTests {
         let queue = try TransferQueue(
             stateURL: workspace.stateURL,
             outboxURL: workspace.outboxURL,
-            runner: runner
+            runner: runner,
+            uploader: ReadyUploadStub(), credentials: TestCredentialProvider()
         )
         let scanner = CaptureScanner(queue: queue, stabilityChecker: ImmediateStableChecker())
         _ = try await scanner.scan(directory: workspace.captureDirectory)
@@ -80,10 +82,7 @@ struct CaptureScannerTests {
         XCTAssertEqual(discovered.queued, 2)
         XCTAssertEqual(queued.queueDepth, 2)
         XCTAssertEqual(Set(queued.pending.map(\.kind)), Set([.image, .video]))
-        XCTAssertEqual(Set(queued.pending.map { URL(fileURLWithPath: $0.stagedPath).lastPathComponent }), Set([
-            image.lastPathComponent,
-            video.lastPathComponent,
-        ]))
+        XCTAssertEqual(Set(queued.pending.map { URL(fileURLWithPath: $0.stagedPath).lastPathComponent }), Set(["capture"]))
 
         let run = await queue.process(configuration: configuration(captureDirectory: workspace.captureDirectory))
         let afterDelivery = await queue.snapshot()
@@ -91,14 +90,11 @@ struct CaptureScannerTests {
         XCTAssertEqual(afterDelivery.queueDepth, 0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: image.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: video.path))
-        XCTAssertEqual(Set(runner.commands.map { $0.arguments.last! }), Set([
-            "delorenj@big-chungus.burro-salmon.ts.net:/home/delorenj/Pictures/Screenshots/",
-            "delorenj@big-chungus.burro-salmon.ts.net:/home/delorenj/Videos/Screencasts/",
-        ]))
+        XCTAssertTrue(runner.commands.isEmpty, "HTTP upload must not invoke SSH or rsync")
 
         _ = try await scanner.scan(directory: workspace.captureDirectory)
         _ = await queue.process(configuration: configuration(captureDirectory: workspace.captureDirectory), force: true)
-        XCTAssertEqual(runner.commands.count, 2, "delivered captures must not replay")
+        XCTAssertEqual(runner.commands.count, 0, "delivered captures must not replay")
     }
 
     @Test
@@ -109,7 +105,8 @@ struct CaptureScannerTests {
         let queue = try TransferQueue(
             stateURL: workspace.stateURL,
             outboxURL: workspace.outboxURL,
-            runner: runner
+            runner: runner,
+            uploader: ReadyUploadStub(), credentials: TestCredentialProvider()
         )
         let scanner = CaptureScanner(queue: queue, stabilityChecker: ImmediateStableChecker())
 
@@ -125,7 +122,7 @@ struct CaptureScannerTests {
         _ = await queue.process(configuration: configuration(captureDirectory: workspace.captureDirectory))
         let afterDelivery = try await scanner.scan(directory: workspace.captureDirectory, mode: .existing)
         XCTAssertEqual(afterDelivery.queued, 0)
-        XCTAssertEqual(runner.commands.count, 1)
+        XCTAssertEqual(runner.commands.count, 0)
     }
 
     @Test
@@ -200,7 +197,8 @@ struct CaptureScannerTests {
         let queue = try TransferQueue(
             stateURL: workspace.stateURL,
             outboxURL: workspace.outboxURL,
-            runner: runner
+            runner: runner,
+            uploader: ReadyUploadStub(), credentials: TestCredentialProvider()
         )
         let counter = CountingStabilityChecker()
         let scanner = CaptureScanner(queue: queue, stabilityChecker: counter)
@@ -291,7 +289,8 @@ struct CaptureScannerTests {
         let queue = try TransferQueue(
             stateURL: workspace.stateURL,
             outboxURL: workspace.outboxURL,
-            runner: RecordingCommandRunner(results: [.success(.success)])
+            runner: RecordingCommandRunner(results: [.success(.success)]),
+            uploader: ReadyUploadStub(), credentials: TestCredentialProvider()
         )
         let scanner = CaptureScanner(queue: queue, stabilityChecker: ImmediateStableChecker())
 

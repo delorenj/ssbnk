@@ -41,6 +41,7 @@ RUN apk upgrade --no-cache \
       /data/archive \
       /data/hosted \
       /data/metadata \
+      /data/spool \
       /data/state \
       /media/screencasts \
       /media/screenshots \

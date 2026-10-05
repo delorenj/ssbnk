@@ -1,0 +1,16 @@
+<node>
+  <interface name="sh.delo.SSBNK.Client1">
+    <method name="GetSnapshot"><arg type="s" name="snapshot" direction="out"/></method>
+    <method name="RegisterCompanion"><arg type="u" name="version" direction="in"/><arg type="t" name="generation" direction="out"/></method>
+    <method name="UnregisterCompanion"/>
+    <method name="GetCopyRequests"><arg type="t" name="generation" direction="in"/><arg type="s" name="requests" direction="out"/></method>
+    <method name="ClaimCopy"><arg type="s" name="token" direction="in"/><arg type="t" name="generation" direction="in"/><arg type="s" name="url" direction="out"/></method>
+    <method name="AcknowledgeCopy"><arg type="s" name="token" direction="in"/><arg type="t" name="generation" direction="in"/><arg type="s" name="status" direction="in"/></method>
+    <method name="RequestCopy"><arg type="s" name="uuid" direction="in"/></method>
+    <method name="RequestOpen"><arg type="s" name="uuid" direction="in"/></method>
+    <method name="RequestRetry"><arg type="s" name="uuid" direction="in"/></method>
+    <method name="OpenSettings"/>
+    <signal name="Changed"><arg type="t" name="revision"/></signal>
+    <signal name="CopyRequestsChanged"><arg type="t" name="generation"/></signal>
+  </interface>
+</node>

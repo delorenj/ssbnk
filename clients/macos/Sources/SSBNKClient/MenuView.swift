@@ -5,104 +5,69 @@ import SwiftUI
 struct MenuView: View {
     @EnvironmentObject private var model: AppModel
     @State private var confirmExistingSync = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 10, height: 10)
-                Text(model.displayState.rawValue)
-                    .font(.headline)
-                Spacer()
-                if model.queueSnapshot.queueDepth > 0 {
-                    Text("\(model.queueSnapshot.queueDepth) queued")
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if let activity = model.activityMessage {
-                ProgressView(activity)
-                    .controlSize(.small)
-            }
-
+            Label(model.displayState.rawValue, systemImage: model.displayState.systemImageName).font(.headline)
+            if let message = model.attentionMessage { Text(message).font(.caption).foregroundStyle(.orange) }
             Divider()
-            Text("Configured routes")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            ForEach(model.configuration.mappings) { mapping in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(mapping.kind.label)
-                        .font(.subheadline.weight(.semibold))
-                    Text(mapping.sourceDirectory)
-                        .font(.caption.monospaced())
-                        .lineLimit(1)
-                        .help(mapping.sourceDirectory)
-                    Text("→ \(model.configuration.sshDestination):\(mapping.remoteDirectory)")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .help("\(model.configuration.sshDestination):\(mapping.remoteDirectory)")
+            if model.queueSnapshot.history.isEmpty {
+                Text("No captures yet. Existing files stay baselined until Sync existing.").foregroundStyle(.secondary)
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(model.queueSnapshot.history.prefix(50))) { row in
+                        HStack(alignment: .top) {
+                            Image(systemName: icon(row)).foregroundStyle(rowColor(row))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Button(URL(fileURLWithPath: row.sourcePath).lastPathComponent) { if row.phase == "ready" { model.copyCapture(row.id) } }
+                                    .buttonStyle(.plain)
+                                Text("\(row.createdAt.formatted(date: .omitted, time: .standard)) · \(row.kind.rawValue) · \(status(row))").font(.caption).foregroundStyle(.secondary)
+                                if let error = row.lastError ?? row.copyWarning { Text(error).font(.caption).foregroundStyle(.orange) }
+                                HStack {
+                                    if row.phase == "ready" {
+                                        Button(row.copyWarning == nil ? "Copy" : "Retry copy") { model.copyCapture(row.id) }
+                                        Button("Open") { model.openCapture(row) }
+                                    }
+                                    if row.phase == "error" { Button("Retry") { model.retryCapture(row.id) } }
+                                }.font(.caption)
+                            }
+                        }
+                    }
                 }
-            }
-
-            if let message = model.attentionMessage {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(model.displayState == .needsAttention ? .red : .secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if let success = model.queueSnapshot.lastSuccessAt {
-                Text("Last success: \(success.formatted(date: .abbreviated, time: .standard))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
+            }.frame(maxHeight: 360)
             Divider()
             HStack {
-                Button("Test Connection") { model.testConnection() }
-                Button("Sync Now") { model.syncNow() }
-                Button("Sync Existing…") { confirmExistingSync = true }
-            }
-            .disabled(model.isWorking)
-
-            Toggle(
-                "Launch at Login",
-                isOn: Binding(
-                    get: { model.launchAtLoginEnabled },
-                    set: { model.setLaunchAtLogin($0) }
-                )
-            )
-
-            HStack {
-                Button("Settings…") {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                    NSApp.activate(ignoringOtherApps: true)
-                }
+                Button("Sync now") { model.syncNow() }
+                Button("Sync existing…") { confirmExistingSync = true }
                 Spacer()
+                Button("Options") { model.showOptions() }
                 Button("Quit") { NSApp.terminate(nil) }
             }
-        }
-        .padding(14)
-        .frame(width: 440)
-        .confirmationDialog(
-            "Sync files that existed before SSBNK Client was installed?",
-            isPresented: $confirmExistingSync,
-            titleVisibility: .visible
-        ) {
-            Button("Sync Existing Captures") { model.syncExisting() }
+        }.padding(14).frame(width: 480)
+        .confirmationDialog("Queue existing captures without automatic clipboard copying?", isPresented: $confirmExistingSync) {
+            Button("Sync existing") { model.syncExisting() }
             Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Supported files that are not already pending or delivered will be queued once. Originals remain on this Mac.")
         }
     }
-
-    private var statusColor: Color {
-        switch model.displayState {
-        case .healthy: return .green
-        case .syncing: return .blue
-        case .needsAttention: return .orange
+    private func rowColor(_ row: QueuedTransfer) -> Color {
+        if row.phase == "ready" { return .green }
+        if row.phase == "error" { return .orange }
+        return .secondary
+    }
+    private func status(_ row: QueuedTransfer) -> String {
+        switch row.phase {
+        case "ready": return "OK"
+        case "error": return "error"
+        case "uploading", "verifying", "processing": return "uploading"
+        default: return "queued"
+        }
+    }
+    private func icon(_ row: QueuedTransfer) -> String {
+        switch status(row) {
+        case "OK": return "checkmark.circle.fill"
+        case "error": return "exclamationmark.triangle.fill"
+        case "uploading": return "arrow.up.circle"
+        default: return "clock"
         }
     }
 }

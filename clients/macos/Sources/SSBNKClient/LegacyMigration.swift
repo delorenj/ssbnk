@@ -15,7 +15,7 @@ enum LegacyMigrationError: Error, LocalizedError, Equatable {
         case .confirmationRequired:
             return "Confirm before retiring the legacy uploader."
         case .replacementNotHealthy:
-            return "The new SSH route must be Healthy before the legacy uploader can be retired."
+            return "The authenticated HTTP replacement must be Healthy before the legacy uploader can be retired."
         case .couldNotDisableAgent(let detail):
             return "Could not disable the legacy uploader: \(detail)"
         }
@@ -61,46 +61,59 @@ final class LegacyMigration {
 
     func detectPresence() async -> Bool {
         if isPresent { return true }
-        guard let result = try? await runner.run(SSBNKCommands.legacyAgentStatus(uid: uid)) else { return false }
-        return result.succeeded
+        guard let result = try? await runner.run(SSBNKCommands.legacyAgentStatus(uid: uid)) else { return true }
+        return result.succeeded || !Self.meansServiceIsMissing(result)
     }
 
     func retire(replacementHealth: ClientHealthState, confirmed: Bool) async throws {
         guard confirmed else { throw LegacyMigrationError.confirmationRequired }
         guard replacementHealth == .healthy else { throw LegacyMigrationError.replacementNotHealthy }
+        throw UploadFailure(code: "HANDOVER_REQUIRED", message: "Controlled capture, verified vault migration, durable boundary and rollback qualification are required before legacy retirement. Legacy files were preserved.", retryable: false)
+    }
 
-        let status: CommandResult
-        do {
-            status = try await runner.run(SSBNKCommands.legacyAgentStatus(uid: uid))
-        } catch {
-            throw LegacyMigrationError.couldNotDisableAgent(error.localizedDescription)
-        }
-        if status.succeeded {
-            let result: CommandResult
-            do {
-                result = try await runner.run(SSBNKCommands.disableLegacyAgent(uid: uid))
-            } catch {
-                throw LegacyMigrationError.couldNotDisableAgent(error.localizedDescription)
-            }
-            guard result.succeeded else {
-                let detail = result.standardError.trimmingCharacters(in: .whitespacesAndNewlines)
-                throw LegacyMigrationError.couldNotDisableAgent(
-                    detail.isEmpty ? "launchctl exited with status \(result.exitCode)" : detail
-                )
-            }
-        } else if !Self.meansServiceIsMissing(status) {
-            let detail = status.standardError.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw LegacyMigrationError.couldNotDisableAgent(
-                detail.isEmpty ? "could not determine whether the legacy job is loaded" : detail
-            )
-        }
-
-        if fileManager.fileExists(atPath: artifacts.launchAgentPlist.path) {
-            try fileManager.removeItem(at: artifacts.launchAgentPlist)
-        }
-
+    func cutover(configuration: ClientConfiguration, controlledReady: () async throws -> Void,
+                 persistBoundary: () async throws -> Void, commitHandover: () async throws -> Void,
+                 confirmed: Bool, credentials: UploadCredentialProviding = UploadCredentialProvider()) async throws {
+        guard confirmed else { throw LegacyMigrationError.confirmationRequired }
+        let credential = try await credentials.resolve(reference: configuration.credentialReference ?? "")
         if fileManager.fileExists(atPath: artifacts.credentialConfiguration.path) {
-            try fileManager.removeItem(at: artifacts.credentialConfiguration)
+            let attributes = try fileManager.attributesOfItem(atPath: artifacts.credentialConfiguration.path)
+            guard (attributes[.size] as? NSNumber)?.intValue ?? 65537 <= 65536 else { throw LegacyMigrationError.replacementNotHealthy }
+            let contents = try String(contentsOf: artifacts.credentialConfiguration, encoding: .utf8)
+            var legacyKey: String?
+            for line in contents.split(separator: "\n") {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                let assignment = trimmed.hasPrefix("export ") ? String(trimmed.dropFirst(7)) : trimmed
+                guard assignment.hasPrefix("SSBNK_UPLOAD_KEY=") else { continue }
+                var value = String(assignment.dropFirst("SSBNK_UPLOAD_KEY=".count))
+                if value.count >= 2, let first = value.first, first == value.last, first == "\"" || first == "'" { value = String(value.dropFirst().dropLast()) }
+                guard !value.contains("$"), !value.contains("`") else { throw LegacyMigrationError.replacementNotHealthy }
+                legacyKey = value
+            }
+            guard let legacyKey, try CaptureHash.data(Data(legacyKey.utf8)) == CaptureHash.data(Data(credential.utf8)) else {
+                throw UploadFailure(code: "VAULT_MIGRATION", message: "Verified vault migration must match the legacy key; plaintext file preserved.", retryable: false)
+            }
+        }
+        try await controlledReady()
+        try await persistBoundary()
+        let status = try await runner.run(SSBNKCommands.legacyAgentStatus(uid: uid))
+        let wasActive = status.succeeded
+        guard wasActive || Self.meansServiceIsMissing(status) else { throw LegacyMigrationError.couldNotDisableAgent("legacy status is uncertain") }
+        do {
+            if wasActive {
+                let stopped = try await runner.run(SSBNKCommands.disableLegacyAgent(uid: uid))
+                guard stopped.succeeded else { throw LegacyMigrationError.couldNotDisableAgent("launchctl bootout failed") }
+            }
+            let disabled = try await runner.run(Command(executable: SSBNKCommands.launchctlExecutable, arguments: ["disable", "gui/\(uid)/\(Self.agentLabel)"], timeout: 10))
+            guard disabled.succeeded else { throw LegacyMigrationError.couldNotDisableAgent("launchctl disable failed") }
+            let inactive = try await runner.run(SSBNKCommands.legacyAgentStatus(uid: uid))
+            let processes = try await runner.run(Command(executable: "/usr/bin/pgrep", arguments: ["-u", String(uid), "-f", "remote-screenshot-upload.sh"], timeout: 10))
+            guard Self.meansServiceIsMissing(inactive), processes.exitCode == 1 else { throw LegacyMigrationError.couldNotDisableAgent("legacy inactivity was not verified") }
+            try await commitHandover()
+        } catch {
+            _ = try? await runner.run(Command(executable: SSBNKCommands.launchctlExecutable, arguments: ["enable", "gui/\(uid)/\(Self.agentLabel)"], timeout: 10))
+            if wasActive { _ = try? await runner.run(Command(executable: SSBNKCommands.launchctlExecutable, arguments: ["bootstrap", "gui/\(uid)", artifacts.launchAgentPlist.path], timeout: 10)) }
+            throw error
         }
     }
 

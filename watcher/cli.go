@@ -29,6 +29,13 @@ type cliDependencies struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "internal-media" {
+		if err := runMediaLauncher(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "ssbnk: contained media execution failed")
+			os.Exit(1)
+		}
+		return
+	}
 	os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))
 }
 

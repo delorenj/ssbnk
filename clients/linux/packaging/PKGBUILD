@@ -1,0 +1,17 @@
+pkgname=ssbnk-client
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Durable SSBNK screenshot and recording tray client'
+arch=('any')
+url='https://github.com/delorenj/ssbnk'
+license=('MIT')
+depends=('python' 'python-gobject' 'gtk3' 'libayatana-appindicator' 'ca-certificates' 'xdg-utils' 'wl-clipboard' 'xclip')
+source=('client.tar.gz')
+sha256sums=('SKIP')
+
+package() {
+    install -d "$pkgdir/usr/lib/ssbnk-client" "$pkgdir/usr/bin" "$pkgdir/usr/share/applications"
+    cp -r "$srcdir/client/ssbnk_client" "$pkgdir/usr/lib/ssbnk-client/"
+    install -m755 "$srcdir/client/ssbnk-client" "$pkgdir/usr/bin/ssbnk-client"
+    install -m644 "$srcdir/client/ssbnk-client.desktop" "$pkgdir/usr/share/applications/"
+}

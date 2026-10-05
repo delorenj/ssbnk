@@ -1,0 +1,8 @@
+{
+  "uuid": "ssbnk@delo.sh",
+  "name": "SSBNK Client",
+  "description": "Capture delivery history and originating-session clipboard adapter",
+  "shell-version": ["46", "50"],
+  "version": 1,
+  "url": "https://github.com/delorenj/ssbnk"
+}

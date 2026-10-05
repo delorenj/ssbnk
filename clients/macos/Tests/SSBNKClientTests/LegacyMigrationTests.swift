@@ -5,79 +5,38 @@ import Testing
 @Suite(.serialized)
 struct LegacyMigrationTests {
     @Test
-    func testMigrationRequiresConfirmationAndHealthyReplacementThenRemovesCredential() async throws {
+    func incompleteHandoverPreservesLegacyAndPlaintextConfiguration() async throws {
         let workspace = try TestWorkspace()
-        let home = workspace.root.appendingPathComponent("home", isDirectory: true)
-        let plist = home.appendingPathComponent("Library/LaunchAgents/sh.delo.ss.remote-upload.plist")
-        let credentials = home.appendingPathComponent(".config/ssbnk/remote.env")
-        try FileManager.default.createDirectory(at: plist.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: credentials.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("plist".utf8).write(to: plist)
-        try Data("legacy credential configuration".utf8).write(to: credentials)
-        let runner = RecordingCommandRunner(results: [.success(.success)])
-        let migration = LegacyMigration(homeDirectory: home, runner: runner, uid: 501)
-
-        do {
-            try await migration.retire(replacementHealth: .healthy, confirmed: false)
-            XCTFail("migration should require confirmation")
-        } catch {
-            XCTAssertEqual(error as? LegacyMigrationError, .confirmationRequired)
-        }
-        do {
-            try await migration.retire(replacementHealth: .syncing, confirmed: true)
-            XCTFail("migration should require a healthy replacement")
-        } catch {
-            XCTAssertEqual(error as? LegacyMigrationError, .replacementNotHealthy)
-        }
-        XCTAssertTrue(FileManager.default.fileExists(atPath: plist.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: credentials.path))
-
-        try await migration.retire(replacementHealth: .healthy, confirmed: true)
-
-        XCTAssertFalse(migration.isPresent)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: plist.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: credentials.path))
-        XCTAssertEqual(runner.commands, [
-            SSBNKCommands.legacyAgentStatus(uid: 501),
-            SSBNKCommands.disableLegacyAgent(uid: 501),
-        ])
+        let credential = workspace.root.appendingPathComponent(".config/ssbnk/remote.env")
+        try FileManager.default.createDirectory(at: credential.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("nonsecret legacy placeholder".utf8).write(to: credential)
+        let runner = RecordingCommandRunner()
+        let migration = LegacyMigration(homeDirectory: workspace.root, runner: runner)
+        do { try await migration.retire(replacementHealth: .healthy, confirmed: true); XCTFail("Unqualified handover accepted") }
+        catch let error as UploadFailure { XCTAssertEqual(error.code, "HANDOVER_REQUIRED") }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: credential.path))
+        XCTAssertTrue(runner.commands.isEmpty)
     }
-
     @Test
-    func testFailedLegacyBootoutPreservesPlistAndCredential() async throws {
+    func failedCutoverReenablesLegacyAndPreservesFiles() async throws {
         let workspace = try TestWorkspace()
-        let home = workspace.root.appendingPathComponent("home", isDirectory: true)
-        let plist = home.appendingPathComponent("Library/LaunchAgents/sh.delo.ss.remote-upload.plist")
-        let credentials = home.appendingPathComponent(".config/ssbnk/remote.env")
-        try FileManager.default.createDirectory(at: plist.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: credentials.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("plist".utf8).write(to: plist)
-        try Data("credential config".utf8).write(to: credentials)
-        let runner = RecordingCommandRunner(results: [
-            .success(.success),
-            .success(.failure("operation not permitted")),
-        ])
-        let migration = LegacyMigration(homeDirectory: home, runner: runner, uid: 501)
-
-        do {
-            try await migration.retire(replacementHealth: .healthy, confirmed: true)
-            XCTFail("failed bootout must stop migration")
-        } catch let error as LegacyMigrationError {
-            XCTAssertTrue(error.localizedDescription.contains("operation not permitted"))
-        }
-
-        XCTAssertTrue(FileManager.default.fileExists(atPath: plist.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: credentials.path))
-    }
-
-    @Test
-    func testLoadedLegacyJobIsDetectedWithoutPlist() async throws {
-        let workspace = try TestWorkspace()
-        let runner = RecordingCommandRunner(results: [.success(.success)])
+        let runner = RecordingCommandRunner(results: [.success(.success), .success(.failure("bootout denied")), .success(.success), .success(.success)])
         let migration = LegacyMigration(homeDirectory: workspace.root, runner: runner, uid: 501)
+        var boundary = false
+        do {
+            try await migration.cutover(configuration: configuration(captureDirectory: workspace.captureDirectory), controlledReady: {}, persistBoundary: { boundary = true }, commitHandover: { XCTFail("Failed cutover committed") }, confirmed: true, credentials: TestCredentialProvider())
+            XCTFail("Failed bootout accepted")
+        } catch {}
+        XCTAssertTrue(boundary)
+        XCTAssertTrue(runner.commands.contains { $0.arguments.first == "enable" })
+        XCTAssertTrue(runner.commands.contains { $0.arguments.first == "bootstrap" })
+    }
 
-        let isPresent = await migration.detectPresence()
-        XCTAssertTrue(isPresent)
-        XCTAssertEqual(runner.commands, [SSBNKCommands.legacyAgentStatus(uid: 501)])
+    @Test
+    func loadedLegacyJobIsDetectedWithoutPlist() async throws {
+        let workspace = try TestWorkspace()
+        let runner = RecordingCommandRunner()
+        let present = await LegacyMigration(homeDirectory: workspace.root, runner: runner).detectPresence()
+        XCTAssertTrue(present)
     }
 }

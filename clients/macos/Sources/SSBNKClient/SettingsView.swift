@@ -5,93 +5,51 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var draft = ClientConfiguration.defaults()
-    @State private var confirmLegacyRetirement = false
-
+    @State private var confirmHandover = false
     var body: some View {
         Form {
-            Section("Capture folder") {
-                HStack {
-                    TextField("Folder", text: $draft.captureDirectory)
-                    Button("Choose…", action: chooseFolder)
-                }
-                Text("Screenshots and recordings are classified from this shared folder. Existing files are baselined on first use.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            Section("Capture folders") {
+                folder("Screenshots", kind: .image)
+                folder("Recordings", kind: .video)
+                Text("Initial setup and folder changes baseline existing files. Restart finds missed captures.").font(.caption).foregroundStyle(.secondary)
             }
-
             Section("Server") {
-                TextField("SSH destination", text: $draft.sshDestination)
-                TextField("Public health URL", text: $draft.publicHealthURL)
-                TextField("Screenshot watch root", text: $draft.imageRemoteDirectory)
-                TextField("Recording watch root", text: $draft.videoRemoteDirectory)
+                TextField("API origin", text: Binding(get: { draft.apiOrigin ?? draft.resolvedOrigin }, set: { draft.apiOrigin = $0 }))
+                TextField("DeLoSecrets op:// reference", text: Binding(get: { draft.credentialReference ?? "" }, set: { draft.credentialReference = $0 }))
+                Button("Test connection") { model.testConnection() }
             }
-
-            Section("Mappings") {
-                ForEach(draft.mappings) { mapping in
-                    LabeledContent(mapping.kind.label) {
-                        Text("\(mapping.sourceDirectory) → \(draft.sshDestination):\(mapping.remoteDirectory)")
-                            .font(.caption.monospaced())
-                            .textSelection(.enabled)
-                    }
-                }
-            }
-
             Section("Startup") {
-                Toggle(
-                    "Launch SSBNK Client at login",
-                    isOn: Binding(
-                        get: { model.launchAtLoginEnabled },
-                        set: { model.setLaunchAtLogin($0) }
-                    )
-                )
+                Toggle("Launch at login", isOn: Binding(get: { model.launchAtLoginEnabled }, set: { model.setLaunchAtLogin($0) }))
             }
-
             if model.legacyUploaderPresent {
-                Section("Legacy uploader") {
-                    Text("After this client is Healthy, retire the old LaunchAgent and delete its HTTP credential configuration.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Retire Legacy Uploader…", role: .destructive) {
-                        confirmLegacyRetirement = true
-                    }
-                    .disabled(model.displayState != .healthy)
+                Section("Legacy handover") {
+                    Text("Automatic submission is gated. Verify vault migration, a controlled capture outside old watched roots, and legacy inactivity before cutover. Legacy credentials are never deleted here.").font(.caption)
+                    Button("Verify handover…") { confirmHandover = true }
                 }
             }
-
+            if let error = model.attentionMessage { Text(error).foregroundStyle(.orange).font(.caption) }
             HStack {
-                Spacer()
                 Button("Revert") { draft = model.configuration }
-                Button("Save") { model.saveConfiguration(draft) }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!draft.validationIssues().isEmpty || model.isWorking)
+                Spacer()
+                Button("Save") { draft.version = 2; model.saveConfiguration(draft) }.disabled(!draft.validationIssues().isEmpty)
             }
-        }
-        .formStyle(.grouped)
-        .padding()
-        .frame(width: 680, height: 520)
+        }.formStyle(.grouped).padding().frame(width: 680, height: 540)
         .onAppear { draft = model.configuration }
-        .confirmationDialog(
-            "Retire the legacy HTTP uploader?",
-            isPresented: $confirmLegacyRetirement,
-            titleVisibility: .visible
-        ) {
-            Button("Disable and Remove Credential", role: .destructive) {
-                model.retireLegacyUploader(confirmed: true)
-            }
+        .confirmationDialog("Verify a controlled capture and vault migration, then disable the legacy uploader?", isPresented: $confirmHandover) {
+            Button("Verify and cut over") { model.retireLegacyUploader(confirmed: true) }
             Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This unloads and removes \(LegacyMigration.agentLabel) and deletes ~/.config/ssbnk/remote.env. It runs only while the new route is Healthy.")
         }
     }
-
-    private func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = URL(fileURLWithPath: draft.captureDirectory, isDirectory: true)
-        if panel.runModal() == .OK, let url = panel.url {
-            draft.captureDirectory = url.path
+    private func folder(_ label: String, kind: MediaKind) -> some View {
+        HStack {
+            TextField(label, text: Binding(get: { kind == .image ? draft.screenshotDirectory ?? draft.captureDirectory : draft.recordingDirectory ?? draft.captureDirectory }, set: { if kind == .image { draft.screenshotDirectory = $0 } else { draft.recordingDirectory = $0 } }))
+            Button("Choose…") {
+                let panel = NSOpenPanel()
+                panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+                if panel.runModal() == .OK, let url = panel.url {
+                    if kind == .image { draft.screenshotDirectory = url.path } else { draft.recordingDirectory = url.path }
+                }
+            }
         }
     }
 }

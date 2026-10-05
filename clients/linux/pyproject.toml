@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ssbnk-client"
+version = "0.1.0"
+requires-python = ">=3.12"
+description = "Durable SSBNK capture tray client"
+
+[project.scripts]
+ssbnk-client = "ssbnk_client.desktop:main"
+
+[tool.setuptools.package-data]
+ssbnk_client = ["client1.xml"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/ssbnk_client/config.py", "src/ssbnk_client/store.py", "src/ssbnk_client/upload.py", "src/ssbnk_client/scanner.py", "src/ssbnk_client/credentials.py", "src/ssbnk_client/session.py", "src/ssbnk_client/clipboard.py", "src/ssbnk_client/worker.py", "src/ssbnk_client/autostart.py"]

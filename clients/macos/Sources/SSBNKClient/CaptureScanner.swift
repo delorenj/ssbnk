@@ -205,23 +205,20 @@ actor CaptureScanner {
         self.fileManager = fileManager
     }
 
-    func scan(directory: URL, mode: CaptureScanMode = .automatic) async throws -> CaptureScanResult {
-        let supportedFiles = try files(in: directory)
-        let folderKey = directory.standardizedFileURL.path
+    func scan(directory: URL, mode: CaptureScanMode = .automatic, kinds: Set<MediaKind> = Set(MediaKind.allCases)) async throws -> CaptureScanResult {
+        let canonicalDirectory = directory.resolvingSymlinksInPath().standardizedFileURL
+        let supportedFiles = try files(in: canonicalDirectory).filter { kinds.contains($0.1) }
+        let folderKey = canonicalDirectory.path
         var result = CaptureScanResult()
-
-        if !(await queue.hasBaseline(for: folderKey)) {
+        var uninitialized = Set<MediaKind>()
+        for kind in kinds where !(await queue.hasCoverage(root: folderKey, kind: kind)) { uninitialized.insert(kind) }
+        if !uninitialized.isEmpty {
             let currentCaptures = supportedFiles.compactMap { url, kind -> CaptureFile? in
                 guard let identity = CaptureIdentity.current(at: url, fileManager: fileManager) else { return nil }
                 return CaptureFile(url: url, identity: identity, kind: kind)
             }
-            try await queue.establishBaseline(
-                for: folderKey,
-                sourcePaths: supportedFiles.map { $0.0.standardizedFileURL.path },
-                captures: currentCaptures
-            )
-            result.baselined = supportedFiles.count
-            if mode == .automatic { return result }
+            try await queue.establishBaseline(for: folderKey, sourcePaths: supportedFiles.map { $0.0.path }, captures: currentCaptures, kinds: uninitialized)
+            result.baselined = currentCaptures.filter { uninitialized.contains($0.kind) }.count
         }
 
         let includeBaseline = mode == .existing

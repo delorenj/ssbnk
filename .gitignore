@@ -176,5 +176,18 @@ dist-ssr
 # Disposable local development data.
 /.dev-data/
 
+# Remote client source exceptions and disposable artifacts.
+!/clients/linux/tests/
+!/clients/linux/tests/**
+/clients/linux/tests/**/__pycache__/
+/clients/linux/tests/**/*.pyc
+!/clients/protocol/fixtures/
+!/clients/protocol/fixtures/**
+/clients/linux/build/
+/clients/linux/dist/
+/clients/linux/src/*.egg-info/
+/clients/linux/.mypy_cache/
+/clients/linux/.ruff_cache/
+
 # Canonical agent config lives in .agents; generated skill projections stay local.
 /.agents/skills
