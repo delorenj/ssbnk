@@ -1,0 +1,23 @@
+{
+  "$schema": "https://registry.kdco.dev/schemas/worktree.json",
+
+  // Worktree plugin configuration (kdco worktree plugin, OpenCode V2).
+  // Documentation: https://github.com/kdcokenny/ocx
+
+  "sync": {
+    "copyFiles": [],
+
+    // OpenCode V2 does not install .opencode/package.json for local plugins (V1 ran
+    // `bun install` itself). The project plugins import zod, node-notifier,
+    // detect-terminal and unique-names-generator from .opencode/node_modules, so a new
+    // worktree must share the main checkout's install or none of them load there.
+    "symlinkDirs": [".opencode/node_modules"],
+
+    "exclude": []
+  },
+
+  "hooks": {
+    "postCreate": [],
+    "preDelete": []
+  }
+}
