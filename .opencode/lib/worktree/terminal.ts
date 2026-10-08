@@ -12,7 +12,7 @@ import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
 import { z } from "zod"
-import type { OpencodeClient } from "../kdco-primitives"
+import type { LogSink } from "../kdco-primitives"
 import {
 	escapeAppleScript,
 	escapeBash,
@@ -42,7 +42,7 @@ export async function withTempScript<T>(
 	scriptContent: string,
 	fn: (scriptPath: string) => Promise<T>,
 	extension: string = ".sh",
-	client?: OpencodeClient,
+	sink?: LogSink,
 ): Promise<T> {
 	const scriptPath = path.join(
 		getTempDir(),
@@ -60,7 +60,7 @@ export async function withTempScript<T>(
 			}
 		} catch (cleanupError) {
 			// Log but don't throw - cleanup is best-effort
-			logWarn(client, "worktree", `Failed to cleanup temp script: ${scriptPath}: ${cleanupError}`)
+			logWarn(sink, "worktree", `Failed to cleanup temp script: ${scriptPath}: ${cleanupError}`)
 		}
 	}
 }

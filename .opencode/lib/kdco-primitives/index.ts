@@ -21,6 +21,6 @@ export { getTempDir } from "./temp"
 // Terminal detection
 export { isInsideTmux } from "./terminal-detect"
 // Types
-export type { OpencodeClient } from "./types"
+export type { LogLevel, LogSink } from "./types"
 // Timeout handling
 export { TimeoutError, withTimeout } from "./with-timeout"

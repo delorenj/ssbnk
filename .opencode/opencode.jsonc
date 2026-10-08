@@ -188,9 +188,15 @@
 	"instructions": [
 		"./tools/philosophy.md"
 	],
-	"plugin": [
-		"@tarquinen/opencode-dcp@3.1.3",
-		"@franlol/opencode-md-table-formatter@0.0.6"
+	// OpenCode V2: `plugin` was renamed `plugins`. Local plugins (.opencode/plugins/*.ts) are
+	// auto-discovered; only packages are listed here.
+	"plugins": [
+		// DCP 3.2.0 is the first release with native OpenCode V2 support (setup(ctx) entrypoint).
+		"@tarquinen/opencode-dcp@3.2.0"
+		// REMOVED: "@franlol/opencode-md-table-formatter@0.0.6". Its only hook was the V1
+		// `experimental.text.complete` (rewrite assistant text to align markdown tables), which
+		// has no V2 equivalent; the author has not shipped a V2 release (last push 2026-02-21) and
+		// the V2 TUI renders markdown tables natively.
 	]
 	// Add MCP servers, tools, plugins here
 }

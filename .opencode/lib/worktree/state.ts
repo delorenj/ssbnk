@@ -13,7 +13,7 @@ import { mkdirSync } from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { z } from "zod"
-import type { OpencodeClient } from "../kdco-primitives"
+import type { LogSink } from "../kdco-primitives"
 import { getProjectId, logWarn } from "../kdco-primitives"
 import { parsePersistedLaunchMetadata, serializePersistedLaunchMetadata } from "./launch-context"
 
@@ -352,7 +352,7 @@ export function getAllSessions(db: Database): Session[] {
  * @param db - Database instance from initStateDb
  * @param spawn - Spawn operation data
  */
-export function setPendingSpawn(db: Database, spawn: PendingSpawn, client?: OpencodeClient): void {
+export function setPendingSpawn(db: Database, spawn: PendingSpawn, sink?: LogSink): void {
 	// Parse at boundary for type safety
 	const parsed = pendingSpawnSchema.parse(spawn)
 
@@ -362,13 +362,13 @@ export function setPendingSpawn(db: Database, spawn: PendingSpawn, client?: Open
 
 	if (existingSpawn) {
 		logWarn(
-			client,
+			sink,
 			"worktree",
 			`Replacing pending spawn: "${existingSpawn.branch}" → "${parsed.branch}"`,
 		)
 	} else if (existingDelete) {
 		logWarn(
-			client,
+			sink,
 			"worktree",
 			`Pending spawn replacing pending delete for: "${existingDelete.branch}"`,
 		)
@@ -434,7 +434,7 @@ export function clearPendingSpawn(db: Database): void {
  * @param db - Database instance from initStateDb
  * @param del - Delete operation data
  */
-export function setPendingDelete(db: Database, del: PendingDelete, client?: OpencodeClient): void {
+export function setPendingDelete(db: Database, del: PendingDelete, sink?: LogSink): void {
 	// Parse at boundary for type safety
 	const parsed = pendingDeleteSchema.parse(del)
 
@@ -444,13 +444,13 @@ export function setPendingDelete(db: Database, del: PendingDelete, client?: Open
 
 	if (existingDelete) {
 		logWarn(
-			client,
+			sink,
 			"worktree",
 			`Replacing pending delete: "${existingDelete.branch}" → "${parsed.branch}"`,
 		)
 	} else if (existingSpawn) {
 		logWarn(
-			client,
+			sink,
 			"worktree",
 			`Pending delete replacing pending spawn for: "${existingSpawn.branch}"`,
 		)

@@ -12,7 +12,7 @@ import * as crypto from "node:crypto"
 import { stat } from "node:fs/promises"
 import * as path from "node:path"
 import { logWarn } from "./log-warn"
-import type { OpencodeClient } from "./types"
+import type { LogSink } from "./types"
 import { TimeoutError, withTimeout } from "./with-timeout"
 
 /**
@@ -43,7 +43,7 @@ function hashPath(projectRoot: string): string {
  * project ID and associated data.
  *
  * @param projectRoot - Absolute path to the project root
- * @param client - Optional OpenCode client for logging warnings
+ * @param sink - Optional log sink for warnings
  * @returns 40-char hex SHA (git root) or 16-char hash (fallback)
  * @throws {Error} When projectRoot is invalid or .git file has invalid format
  *
@@ -56,7 +56,7 @@ function hashPath(projectRoot: string): string {
  * // Returns: "def456..." (16-char path hash)
  * ```
  */
-export async function getProjectId(projectRoot: string, client?: OpencodeClient): Promise<string> {
+export async function getProjectId(projectRoot: string, sink?: LogSink): Promise<string> {
 	// Guard: Validate projectRoot (Law 1: Early Exit, Law 4: Fail Fast)
 	if (!projectRoot || typeof projectRoot !== "string") {
 		throw new Error("getProjectId: projectRoot is required and must be a string")
@@ -69,7 +69,7 @@ export async function getProjectId(projectRoot: string, client?: OpencodeClient)
 
 	// Guard: No .git directory - not a git repo (Law 1: Early Exit)
 	if (!gitStat) {
-		logWarn(client, "project-id", `No .git found at ${projectRoot}, using path hash`)
+		logWarn(sink, "project-id", `No .git found at ${projectRoot}, using path hash`)
 		return hashPath(projectRoot)
 	}
 
@@ -118,7 +118,7 @@ export async function getProjectId(projectRoot: string, client?: OpencodeClient)
 		if (/^[a-f0-9]{40}$/i.test(cached) || /^[a-f0-9]{16}$/i.test(cached)) {
 			return cached
 		}
-		logWarn(client, "project-id", `Invalid cache content at ${cacheFile}, regenerating`)
+		logWarn(sink, "project-id", `Invalid cache content at ${cacheFile}, regenerating`)
 	}
 
 	// Generate project ID from git root commit
@@ -155,16 +155,16 @@ export async function getProjectId(projectRoot: string, client?: OpencodeClient)
 				try {
 					await Bun.write(cacheFile, projectId)
 				} catch (e) {
-					logWarn(client, "project-id", `Failed to cache project ID: ${e}`)
+					logWarn(sink, "project-id", `Failed to cache project ID: ${e}`)
 				}
 				return projectId
 			}
 		} else {
 			const stderr = await new Response(proc.stderr).text()
-			logWarn(client, "project-id", `git rev-list failed (${exitCode}): ${stderr.trim()}`)
+			logWarn(sink, "project-id", `git rev-list failed (${exitCode}): ${stderr.trim()}`)
 		}
 	} catch (error) {
-		logWarn(client, "project-id", `git command failed: ${error}`)
+		logWarn(sink, "project-id", `git command failed: ${error}`)
 	}
 
 	// Fallback to path hash
