@@ -189,5 +189,15 @@ dist-ssr
 /clients/linux/.mypy_cache/
 /clients/linux/.ruff_cache/
 
+# CLI client source exceptions and disposable artifacts.
+!/cli/tests/
+!/cli/tests/**
+/cli/tests/**/__pycache__/
+/cli/tests/**/*.pyc
+/cli/src/*.egg-info/
+/cli/.mypy_cache/
+/cli/.ruff_cache/
+/cli/.pytest_cache/
+
 # Canonical agent config lives in .agents; generated skill projections stay local.
 /.agents/skills

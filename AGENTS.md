@@ -43,10 +43,16 @@ Full generated docs live in `docs/` (start at `docs/index.md`).
 - `install-remote-client.sh`: Interactive installer for remote machines — deps, `~/.config/ssbnk/remote.env`, systemd user service (Linux) or launchd agent (macOS), guided macOS privacy (TCC) grant flow, end-to-end test.
 - `cleanup.sh`: Retention-based cleanup run by the ssbnk-cleanup container via cron.
 
-### 5) Remote Upload Services
+### 5) Typer CLI (`/cli`)
+- Python Typer CLI (`ssbnk`) installed globally via `uv tool` at `~/.local/bin/ssbnk` (and wrapped in `.mise/scripts/ssbnk`).
+- Commands:
+  - `ssbnk get`: Resolves and prints the path of the most recent screenshot and automatically copies it to the Wayland clipboard via `wl-copy`.
+  - `ssbnk config`: Inspects and prints active ssbnk configuration variables across environment variables, `.env`, and defaults (supports `--plain`, `--json`, and single-key lookup).
+
+### 6) Remote Upload Services
 Deployed on Tailnet machines to auto-upload screenshots:
 - **tiny-chungus** (Arch Linux): systemd user service at `~/.config/systemd/user/ssbnk-remote-upload.service`
-- **carries-macbook-air** (macOS): launchd agent at `~/Library/LaunchAgents/sh.delo.ss.remote-upload.plist`
+- **carries-macbook-air** (macOS): launchd agent at `~/Library/LaunchAgents/sh.delo.sh.remote-upload.plist`
 - Config on remote machines: `~/.config/ssbnk/remote.env` (contains `SSBNK_HOST`, `SSBNK_UPLOAD_KEY`, `SSBNK_SCREENSHOT_DIR`)
 
 ## Key Implementation Details
