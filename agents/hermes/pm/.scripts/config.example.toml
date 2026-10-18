@@ -12,9 +12,9 @@
 
 [fleet]
 # Absolute path to the shared Hermes executable every agent launcher execs.
-hermes_bin = "~/.local/share/hermes-agent/releases/0408fec7a153e6c32c064acd2b8053917f1525f1/.venv/bin/hermes"
+hermes_bin = "~/.hermes/hermes-agent/.hermes/bin/hermes"
 # Checkout of the shared hermes-agent repo.
-hermes_repo = "~/.local/share/hermes-agent/releases/0408fec7a153e6c32c064acd2b8053917f1525f1"
+hermes_repo = "~/.hermes/hermes-agent"
 # The workforce CLI. Runtime provisioning delegates named profile topology to
 # this command; it never rewrites profile links itself.
 flume_bin = "flume"

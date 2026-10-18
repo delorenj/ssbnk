@@ -30,8 +30,8 @@ else
     cat > "$CONFIG" <<'TOML'
 # hermes-agent-template config — edit for your environment.
 [fleet]
-hermes_bin = "~/.local/share/hermes-agent/releases/0408fec7a153e6c32c064acd2b8053917f1525f1/.venv/bin/hermes"
-hermes_repo = "~/.local/share/hermes-agent/releases/0408fec7a153e6c32c064acd2b8053917f1525f1"
+hermes_bin = "~/.hermes/hermes-agent/.hermes/bin/hermes"
+hermes_repo = "~/.hermes/hermes-agent"
 hermes_git_url = "https://github.com/delorenj/hermes-agent.git"
 hermes_git_ref = "main"
 hermes_git_sha = "0408fec7a153e6c32c064acd2b8053917f1525f1"
