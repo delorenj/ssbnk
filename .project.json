@@ -29,5 +29,13 @@
   },
   "created_at": "2026-07-23T14:36:33.882Z",
   "updated_at": "2026-07-23T14:36:33.882Z",
-  "project_id": "ssbnk"
+  "project_id": "ssbnk",
+  "bmad": {
+    "companion": {
+      "adapter": {
+        "module": "./.agents/skills/g33-33god-integration/scripts/g33_pjangler_bridge.mjs",
+        "exportName": "g33Companion"
+      }
+    }
+  }
 }
