@@ -41,7 +41,44 @@ fleet-shared Hermes gateway and are routed by `data.target_agent_id`.
 You **MUST NOT** invent new event `type` values. Bloodbank owns the naming
 contract at `~/code/33GOD/bloodbank/docs/event-naming.md` —
 read it before publishing a type you haven't published before.
+<!-- flume:scheduling-policy:start -->
+## Recurring schedules: Candybar is the single clock
 
+**Candybar owns when; Hermes and services own execution.** Every new or changed
+recurring task MUST use a registered Candybar manifest as its one scheduling
+owner. Hermes may execute an agent invocation dispatched by Candybar; it MUST
+NOT own an independent recurring schedule. systemd services and other workers
+may be execution/service runners, not alternative clocks.
+
+Do NOT create or enable ad hoc systemd timers, cron entries, Hermes recurring
+jobs, n8n Schedule Triggers, or embedded sleep/poll loops that schedule recurring
+work outside Candybar. A new systemd timer is **not a Candybar**. Renaming a
+scheduler to a service or wrapping it in an agent does not change ownership.
+Bounded retries within one invocation and event-driven service consumers are
+execution, not permission to start another recurring clock.
+
+Before declaring a recurring task installed or migrated: commit its Candybar
+manifest, read back the registered schedule through Candybar's API, prove an
+actual terminal invocation and its intended effect, and verify every competing
+native clock is disabled. Preserve evidence of the single-clock cutover; tests,
+registration alone, or a successful dispatch receipt are not execution proof.
+Externally pinned Hermes execution is allowed; an arbitrary agent daemon is not
+required. From `~/code/33GOD/candybar/`, run the actual policy lint command:
+`uv run candybar doctor --repo . --live --json`. Keep findings visible; this
+instruction update does not claim runtime cutover or a clean machine.
+
+**Narrow exceptions, never a blanket infrastructure exemption:**
+- The existing `candybar-watchdog.timer` and its page-only service remain OUTSIDE
+  Candybar under AD-22 (`candybar/deploy/watchdog/README.md`), so failure of the
+  scheduler itself remains observable. This exception is only that self-watchdog,
+  not crank-watchdog or any other agent's recurring work; never register it as a
+  Candybar or disable it merely to remove a bypass finding.
+- Any OS/vendor infrastructure exemption or further owner-approved exception
+  must name the exact schedule, responsible owner, scope, and explicit rationale
+  in the owning component's exception record. Absence of that record is a policy
+  violation, not implicit approval. Do not disable an unfamiliar infrastructure
+  timer automatically: report it to its owner for classification.
+<!-- flume:scheduling-policy:end -->
 ## Role-specific behavior
 
 You are the **project-manager ORCHESTRATOR** — the autonomous Hermes carrier of
