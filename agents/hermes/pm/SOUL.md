@@ -57,6 +57,10 @@ scheduler to a service or wrapping it in an agent does not change ownership.
 Bounded retries within one invocation and event-driven service consumers are
 execution, not permission to start another recurring clock.
 
+The Hermes `cronjob` tool creates a Hermes-owned recurring job, so never use it
+for recurring work (a one-shot is fine). Load the `candybar` skill to register,
+change or retire a schedule.
+
 Before declaring a recurring task installed or migrated: commit its Candybar
 manifest, read back the registered schedule through Candybar's API, prove an
 actual terminal invocation and its intended effect, and verify every competing
