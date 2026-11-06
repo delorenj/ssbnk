@@ -51,6 +51,12 @@
 #                                    NOT idempotent by default (two issues may
 #                                    share a title); --if-absent reuses an exact
 #                                    title match and reports created:false.
+#                                    plane: stamps the role's scope label
+#                                    (role.yaml board_scope, else .project.json
+#                                    scope_label; --scope <label> picks one when
+#                                    board_scope lists several) and reports
+#                                    scope_label; --if-absent matches only
+#                                    inside that scope.
 #
 # Each provider reads its credentials from the environment (see providers/*.sh
 # headers) and the board binding from repo-root .project.json.

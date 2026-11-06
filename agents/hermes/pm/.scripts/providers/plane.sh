@@ -789,17 +789,77 @@ except Exception: print("")')"
     # config, never from an argument. Deliberately NOT idempotent by default:
     # two issues may legitimately share a title. Pass --if-absent to reuse an
     # issue whose title already matches exactly (case-insensitive) instead.
-    IF_ABSENT=0
-    case "${1:-}" in --if-absent) IF_ABSENT=1; shift ;; esac
-    TITLE="${1:?usage: create_issue [--if-absent] <title> [description]}"; DESC="${2:-}"
+    #
+    # Scope: a shared board routes work by exactly one scope label per ticket
+    # (e.g. repo:forge). The new ticket is stamped with this role's scope:
+    #   --scope <label>                  explicit; must be one of role.yaml board_scope
+    #   role.yaml board_scope: [<one>]   the role's own scope
+    #   .project.json ticket_provider.scope_label   the repo's scope
+    # A role whose board_scope lists several labels must pass --scope. With none
+    # of these set the board has no scope convention and no label is stamped.
+    # The label must already exist on the board (never created here), and an
+    # --if-absent match only counts inside the same scope, so a same-titled
+    # ticket in another repo's scope is never reused.
+    IF_ABSENT=0; SCOPE_ARG=""
+    while :; do
+      case "${1:-}" in
+        --if-absent) IF_ABSENT=1; shift ;;
+        --scope) [ -n "${2:-}" ] || die "usage: create_issue [--if-absent] [--scope <label>] <title> [description]"; SCOPE_ARG="$2"; shift 2 ;;
+        *) break ;;
+      esac
+    done
+    TITLE="${1:?usage: create_issue [--if-absent] [--scope <label>] <title> [description]}"; DESC="${2:-}"
     [ -n "$WS" ] || die "workspace not set (.project.json ticket_provider.workspace or PLANE_WORKSPACE)"
     [ -n "$PROJ" ] || die "project not set (.project.json ticket_provider.board_id; run 42-ticket-provider.sh)"
+    SCOPE="$(python3 - "$ROLE_YAML" "$SCOPE_ARG" "$(pj_cfg scope_label)" <<'PYSCOPE'
+import json, pathlib, re, sys
+role_yaml, explicit, project_scope = sys.argv[1:4]
+declared = []
+p = pathlib.Path(role_yaml)
+if p.is_file():
+    text = p.read_text()
+    m = re.search(r'(?m)^board_scope:[ \t]*(.*)$', text)
+    if m:
+        inline = m.group(1).strip()
+        if inline.startswith("["):
+            try: declared = [str(x) for x in json.loads(inline)]
+            except ValueError: declared = [x.strip().strip("'\"") for x in inline.strip("[]").split(",") if x.strip()]
+        elif inline:
+            declared = [inline.strip("'\"")]
+        else:
+            block = text[m.end():]
+            for line in block.splitlines():
+                mm = re.match(r'^\s+-\s*(.+?)\s*$', line)
+                if mm: declared.append(mm.group(1).strip("'\""))
+                elif line.strip() and not line.startswith((" ", "\t")): break
+if explicit:
+    if declared and explicit not in declared:
+        sys.exit(f"plane: --scope {explicit!r} is not in this role's board_scope {declared}")
+    print(explicit)
+elif len(declared) == 1:
+    print(declared[0])
+elif len(declared) > 1:
+    sys.exit(f"plane: board_scope lists {declared}; pass --scope <label> to say which one this ticket belongs to")
+else:
+    print(project_scope)
+PYSCOPE
+)" || exit 1
+    SCOPE_ID=""
+    if [ -n "$SCOPE" ]; then
+      SCOPE_ID="$(api_all "projects/$PROJ/labels/" | SCOPE="$SCOPE" python3 -c 'import sys,json,os
+d=json.load(sys.stdin); rows=d if isinstance(d,list) else d.get("results", []) if isinstance(d,dict) else []
+hits=[str(x["id"]) for x in rows if isinstance(x,dict) and x.get("id") and x.get("name")==os.environ["SCOPE"]]
+print(hits[0] if len(hits)==1 else ("AMBIGUOUS" if hits else ""))')"
+      [ -n "$SCOPE_ID" ] || die "scope label '$SCOPE' does not exist on this board; create it on the board (px or Plane), never ad hoc here"
+      [ "$SCOPE_ID" != AMBIGUOUS ] || die "scope label '$SCOPE' matches more than one board label"
+    fi
     IID=""; SEQ=""; CREATED=true
     if [ "$IF_ABSENT" = 1 ]; then
-      HIT="$(api_all "projects/$PROJ/issues/?per_page=200" | TITLE="$TITLE" python3 -c 'import sys,json,os
+      HIT="$(api_all "projects/$PROJ/issues/?per_page=200" | TITLE="$TITLE" SCOPE_ID="$SCOPE_ID" python3 -c 'import sys,json,os
 d=json.load(sys.stdin); rows=d if isinstance(d,list) else d.get("results", []) if isinstance(d,dict) else []
-want=os.environ["TITLE"].strip().lower()
-m=next((i for i in rows if (i.get("name") or "").strip().lower()==want), None)
+want=os.environ["TITLE"].strip().lower(); sid=os.environ["SCOPE_ID"]
+def ids(i): return {str(x.get("id") if isinstance(x,dict) else x) for x in (i.get("labels") or [])}
+m=next((i for i in rows if (i.get("name") or "").strip().lower()==want and (not sid or sid in ids(i))), None)
 print((str(m.get("id","")) + " " + str(m.get("sequence_id","") or "")) if m else "")')"
       if [ -n "$HIT" ]; then IID="${HIT%% *}"; SEQ="${HIT#* }"; CREATED=false; fi
     fi
@@ -809,15 +869,20 @@ print((str(m.get("id","")) + " " + str(m.get("sequence_id","") or "")) if m else
 body={"name": sys.argv[1]}
 desc=sys.argv[2]
 if desc: body["description_html"]="<p>"+html.escape(desc)+"</p>"
-print(json.dumps(body))' "$TITLE" "$DESC")" \
-        | python3 -c 'import sys,json
-d=json.load(sys.stdin)
-print(str(d.get("id","")) + " " + str(d.get("sequence_id","") or ""))')"
-      IID="${NEW%% *}"; SEQ="${NEW#* }"
+if sys.argv[3]: body["labels"]=[sys.argv[3]]
+print(json.dumps(body))' "$TITLE" "$DESC" "$SCOPE_ID")" \
+        | SCOPE_ID="$SCOPE_ID" python3 -c 'import sys,json,os
+d=json.load(sys.stdin); sid=os.environ["SCOPE_ID"]
+got={str(x.get("id") if isinstance(x,dict) else x) for x in (d.get("labels") or [])}
+print(str(d.get("id","")) + " " + str(d.get("sequence_id","") or "") + " " + ("ok" if (not sid or sid in got) else "unstamped"))')"
+      IID="${NEW%% *}"; REST="${NEW#* }"; SEQ="${REST%% *}"
+      [ -n "$IID" ] || die "create_issue failed"
+      [ "${REST##* }" = ok ] || die "created issue $SEQ ($IID) but Plane did not apply scope label '$SCOPE'; label it by hand before anyone routes it"
     fi
     [ -n "$IID" ] || die "create_issue failed"
-    printf '{"issue_id":"%s","key":"%s","issue_url":"%s/%s/projects/%s/issues/%s","created":%s}\n' \
-      "$IID" "$SEQ" "$BASE" "$WS" "$PROJ" "$IID" "$CREATED"
+    SCOPE_JSON="null"; [ -z "$SCOPE" ] || SCOPE_JSON="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$SCOPE")"
+    printf '{"issue_id":"%s","key":"%s","issue_url":"%s/%s/projects/%s/issues/%s","created":%s,"scope_label":%s}\n' \
+      "$IID" "$SEQ" "$BASE" "$WS" "$PROJ" "$IID" "$CREATED" "$SCOPE_JSON"
     ;;
 
   *) die "unknown op: $OP" ;;

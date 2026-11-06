@@ -30,7 +30,7 @@ tp transition <id> <normalized-state>  # backlog|unstarted|started|in_review|com
                                        # or an extended target role.yaml names (awaiting_decision,
                                        # e2e_testing, ready_for_documentation, needs_re_evaluation)
 tp resolve_state <normalized-state>    # read-only: which concrete lane a target maps to
-tp create_issue "<title>" "<desc>"    # file a NEW ticket; --if-absent to dedupe by title
+tp create_issue "<title>" "<desc>"    # file a NEW ticket in YOUR scope (label stamped); --if-absent to dedupe by title
 ```
 
 Reason in **normalized states**, not provider terms. This pass works identically
