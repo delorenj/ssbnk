@@ -49,12 +49,14 @@ load_fleet_environment "$FLEET_ENV" "$FLEET_ENV_PARSER"
 # scheduler stamps on its own admitted runs (gateway/session_cron.py, hermes
 # `cron run`), so a client-created session tagged `cron` is refused by the state
 # store with "invalid_params". This pass is a deliberate machine-paced run, not a
-# scheduler fire. It is a finite `chat -q` run, which Hermes stores as `oneshot`
-# (gateway/session_policy.py SURFACES, hermes_cli/gateway_chat.py): hidden from
-# the human session pickers, but still in the agent's own `session_search`, so the
-# PM can later answer "what did your last board pass do?". (`tool` is for
-# third-party integrations and is hidden from session_search too.)
-SESSION_SOURCE="${SENTINEL_SESSION_SOURCE:-oneshot}"
+# scheduler fire, so it runs as `tool`, the label for machine-paced integrations
+# (hidden from the human session pickers and from the agent's own session_search;
+# the pass report and state file are its record). NOT `oneshot`: Hermes charges a
+# oneshot session's subagents against delegation.oneshot_max_children (default 2,
+# tools/delegate_tool.py _oneshot_spawn_budget), a hidden two-workers-per-pass cap
+# that contradicts "one worker per ready ticket, no WIP limit". On 2026-11-06 it
+# refused the third delegate_task of a forge PM pass and stalled the board.
+SESSION_SOURCE="${SENTINEL_SESSION_SOURCE:-tool}"
 case "$SESSION_SOURCE" in
   cli|tui|gui|acp|tool|oneshot) ;;
   *)

@@ -1,7 +1,7 @@
 # Ssbnk PM — continuous ticket sentinel pass
 
 Run one continuous ticket orchestration pass for the **ssbnk** repo.
-A cheap systemd heartbeat already decided this full pass is needed.
+The heartbeat runner (`.scripts/heartbeat.sh`) already decided this full pass is needed.
 
 Working repo: the git root containing this role at `agents/hermes/pm/`.
 Ticket provider: **plane** (reached only through the adapter — see below).
@@ -70,7 +70,7 @@ off.**
 ## Pass
 
 **Trigger.** This pass runs both as a scheduled reconcile (`.scripts/heartbeat.sh`;
-the per-agent heartbeat timer is retired, so scheduling comes from Bloodbank) AND
+the per-agent heartbeat timer is retired; any recurring schedule is a Candybar manifest, never a timer or cron) AND
 on a live **Plane board event** — a `bloodbank.evt.repo.task.*` fact (repo identity
 lives in `data.repo`, never in the subject; the Plane name survives only as
 `data.provider_event_type`, e.g. `plane.ticket.created`). The single normalizer
