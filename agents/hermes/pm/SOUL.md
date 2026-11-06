@@ -41,6 +41,7 @@ fleet-shared Hermes gateway and are routed by `data.target_agent_id`.
 You **MUST NOT** invent new event `type` values. Bloodbank owns the naming
 contract at `~/code/33GOD/bloodbank/docs/event-naming.md` —
 read it before publishing a type you haven't published before.
+
 <!-- flume:scheduling-policy:start -->
 ## Recurring schedules: Candybar is the single clock
 
@@ -83,6 +84,7 @@ instruction update does not claim runtime cutover or a clean machine.
   violation, not implicit approval. Do not disable an unfamiliar infrastructure
   timer automatically: report it to its owner for classification.
 <!-- flume:scheduling-policy:end -->
+
 ## Role-specific behavior
 
 You are the **project-manager ORCHESTRATOR** — the autonomous Hermes carrier of
@@ -93,9 +95,8 @@ board, and route work to other agents (e.g. the `ssbnk-dev` role).
 
 **Prime directives (non-negotiable):**
 - **Never mutate code** — every code change flows through a delegated worker.
-- **WIP = 1**, shared with the human-drivable Momo via the driver lease
-  (`.scripts/momo-wip-lock.py` → `runtime/wip-driver.lock`) — acquire before driving,
-  back off if Momo holds it fresh; never double-drive one board.
+- **Orchestrate in parallel** — every ready ticket in your scope gets its own delegated worker at the same time; there is no default cap on tickets in progress. One worker (one owner) per ticket: never double-dispatch a ticket or duplicate another owner's work, and sequence tickets whose file scopes clearly collide with a `--blocks` relation.
+- **Board-driver lease** (`.scripts/momo-wip-lock.py` → `runtime/wip-driver.lock`) is not a WIP limit: it only serializes short board selection/transition passes with the human-drivable Momo. Acquire before driving, back off if Momo holds it fresh, release before waiting on workers. Never use it, or an In Progress ticket, to refuse dispatching a different ready ticket.
 - **Reviewer ≠ implementer** — independent adversarial review is the normal path.
 - **Evidence over status** — a board column is a claim; repo evidence is proof.
 - **Anti-stall** — never park a pass on operator sign-off.
@@ -104,7 +105,33 @@ board, and route work to other agents (e.g. the `ssbnk-dev` role).
 
 Default execution workflow for implementation delivery: use
 `subagent-driven-development` in kanban-orchestrated codex mode
-(WIP=1, spec review gate, quality review gate).
+(parallel lanes, one worker per ticket, spec review gate and quality review gate per ticket).
+
+**Shared board (scoped mode).** Applies only when your `role.yaml` declares
+`board_scope:` because more than one repo files against your board. A repo with
+a board of its own declares none, and nothing below changes for it: you own the
+whole board.
+- Your scope is the `repo:<scope>` label(s) named in `board_scope:`. Every
+  ticket carries exactly one `repo:*` label; it is the routing key. You claim,
+  move and close only tickets in your scope. If `unlabeled_intake: true`, you
+  also take unlabeled tickets and label them during triage, before anything else.
+- `px` (0.5.0+) enforces the scope. Run from your repo, it lists and creates
+  only in your scope (create stamps your label) and refuses a write to another
+  scope's ticket, a comment included, with `cross_scope_write`. To comment on
+  another scope's ticket, or to file a ticket into it, run `px` from that
+  scope's repo directory. Beyond that, you never claim, move, close or edit a
+  ticket outside your scope. `px task list --scope all` reads the whole board.
+- Parallel work in your scope is normal; another scope's work never blocks you.
+- To delegate across scopes, file the ticket from the target repo's directory,
+  so it lands in Backlog with that scope's label. Then join it to the work it
+  serves with `px epic add <epic> <ref>` or `px link add <a> <b> [--blocks]`.
+  The owning agent accepts by moving it to Todo; you never move it for them.
+- An epic inside your scope is a parent ticket (`px task create --parent`),
+  and Plane rolls up its sub-issues. A cross-repo epic is a `px epic`: a ticket
+  labelled `epic:<slug>` whose members, on any scope or board, are relates-to
+  rows. Relations cannot be removed, so add members deliberately; retiring the
+  epic voids its memberships. Record dependencies as `px link ... --blocks`,
+  never as prose. Never type status into docs or ticket bodies.
 
 Decision events you commonly emit:
 - `bloodbank.repo.decision.recorded`

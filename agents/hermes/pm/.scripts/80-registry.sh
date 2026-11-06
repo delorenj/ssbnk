@@ -49,7 +49,6 @@ python3 - "$REGISTRY_FILE" "$AGENT_ID" "$REPO" "$ROLE" "$DISPLAY_NAME" \
   "$PLANE_WORKSPACE" "$PLANE_PROJECT_ID" "$(yaml_get plane.identifier)" \
   "$HERMES_BIN" "$HERMES_AGENT_REPO" "$HERMES_RUNTIME_GIT_URL" \
   "$HERMES_RUNTIME_GIT_REF" "$HERMES_RUNTIME_GIT_SHA" "$FLEET_ENV" \
-  "hermes-${AGENT_ID}-gateway.service" "hermes-${AGENT_ID}-heartbeat.timer" \
   "$ROLE_IDENTITY_JSON" <<'PYEOF'
 import datetime
 import copy
@@ -69,8 +68,8 @@ except ImportError:
  slack_status, slack_team_id, slack_team_name, slack_user_id, slack_bot_id,
  slack_username, role_yaml, plane_ws, plane_id,
  plane_ident, hermes_bin, hermes_repo, hermes_git_url,
- hermes_git_ref, hermes_git_sha, fleet_env, gw, heartbeat,
- identity_json) = sys.argv[1:31]
+ hermes_git_ref, hermes_git_sha, fleet_env,
+ identity_json) = sys.argv[1:29]
 p = pathlib.Path(path)
 if p.is_symlink():
     raise SystemExit(f"refusing to update registry symlink: {p}")
@@ -208,17 +207,25 @@ managed = {
     "git_sha": hermes_git_sha,
     "fleet_env": fleet_env,
   },
-  # Only the unit NAMES the handbook's systemd_lifecycle seam declares
-  # writable. The gateway/heartbeat STATE lives in role.yaml `service_state`
-  # (70-systemd.sh writes it, 99-summary.sh reads it); flume review derives the
-  # desired gateway state from the messaging declaration and reports any other
-  # systemd key on a row as `registry-retired-key`.
-  "systemd": {
-    "gateway_unit": gw,
-    "heartbeat_timer": heartbeat,
-  },
+  # No `systemd` projection. Since 2026-10-11 ONE host gateway
+  # (hermes-gateway.service) serves every profile; it is declared once by the
+  # top-level registry `gateways` block, never per row. A per-agent
+  # `systemd.gateway_unit` named a unit that does not exist (the daily report's
+  # "gateway units unknown to systemd") and fed a raw try-restart in
+  # fleet-sync.sh. Gateway state lives in role.yaml `service_state`
+  # (70-systemd.sh writes it, 99-summary.sh reads it).
   "provisioned_at": provisioned_at,
 }
+# A channel the operator PARKED with `flume channel offline` stays parked: a
+# re-provision from role.yaml never flips it back to verified. Only
+# `flume channel online` lifts the park.
+for _platform in ("telegram", "slack"):
+    _prior = existing.get(_platform)
+    if isinstance(_prior, dict) and _prior.get("provisioning_status") == "offline":
+        managed[_platform]["provisioning_status"] = "offline"
+        for _key in ("offline_since", "offline_reason"):
+            if _prior.get(_key):
+                managed[_platform][_key] = _prior[_key]
 
 # Named agent: the stable identity and its personal bank. A post (no
 # `identity:` in role.yaml) leaves both absent and keeps the compatibility
@@ -257,12 +264,18 @@ if not identity and isinstance(entry.get("identity"), str):
 # Retired managed schema, not extension metadata. consumer_unit would falsely
 # advertise a second per-agent Bloodbank execution path; gateway_state and
 # heartbeat_state (projected 2026-08-27 to 2026-09-23) duplicate role.yaml
-# service_state under keys the handbook does not declare.
-RETIRED_SYSTEMD_KEYS = ("consumer_unit", "gateway_state", "heartbeat_state")
+# service_state under keys the handbook does not declare. heartbeat_timer names
+# a retired unit; reprovisioning removes that old managed projection as well.
+# gateway_unit (retired 2026-10-11) named the per-agent hermes-<agent>-gateway.service;
+# the one host gateway is declared by the top-level `gateways` block instead.
+RETIRED_SYSTEMD_KEYS = ("consumer_unit", "gateway_state", "gateway_unit", "heartbeat_state", "heartbeat_timer")
 systemd = entry.get("systemd")
 if isinstance(systemd, dict):
     for retired_key in RETIRED_SYSTEMD_KEYS:
         systemd.pop(retired_key, None)
+    if not systemd:
+        # Nothing managed is left; an extension key someone added survives.
+        entry.pop("systemd", None)
 agents[agent_id] = entry
 rendered = yaml.safe_dump(data, sort_keys=False)
 p.parent.mkdir(parents=True, exist_ok=True)
@@ -305,5 +318,24 @@ PYEOF
 
 fleet_lock_release
 trap - EXIT
+
+# The row just written is the org chart's project_path: the input of the renderer's terminal.cwd pin.
+# Step 10 rendered this profile BEFORE the row existed (a fresh hire) or while it named an older
+# path, so the generated config.yaml is a faithful render with a stale pin. Re-render it through the
+# canonical renderer -- the registry stays the one ordering truth, and nothing here re-derives the
+# pin. `repin` rewrites a pin-only difference and refuses real out-of-band drift (absorb first).
+PROFILE_RENDERER="${PROFILE_RENDERER:-$HERMES_TEMPLATE_REPO/scripts/hermes-profile-config.py}"
+PIN_PROFILE_HOME="${HERMES_FLEET_HOME:-$HOME/.hermes}/profiles/$PROFILE_NAME"
+if [[ -f "$PIN_PROFILE_HOME/config.delta.yaml" && ! -L "$PIN_PROFILE_HOME/config.delta.yaml" ]]; then
+  [[ -f "$PROFILE_RENDERER" && ! -L "$PROFILE_RENDERER" ]] \
+    || die "canonical config renderer required to pin the registered project: $PROFILE_RENDERER"
+  if repin_output="$(HERMES_AGENTS_REGISTRY="$REGISTRY_FILE" \
+      python3 -I "$PROFILE_RENDERER" repin --profile "$PROFILE_NAME" 2>&1)"; then
+    log "    profile config pinned to the registry row: ${repin_output##*$'\n'}"
+  else
+    warn "    $PROFILE_NAME's config.yaml has out-of-band drift beyond renderer pins; its terminal.cwd is NOT pinned. Review first: hermes-profile-config.py absorb --profile $PROFILE_NAME --dry-run (this one profile only, never a sweep); if it keeps your secrets.* references, rerun it without --dry-run, then hermes-profile-config.py repin --profile $PROFILE_NAME"
+    printf '%s\n' "$repin_output" >&2
+  fi
+fi
 
 mark_done 80-registry

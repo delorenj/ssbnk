@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
+import ctypes.util
 import errno
 import hashlib
 import re
@@ -496,7 +498,8 @@ def write_atomic_document(
             os.link(temporary, path, follow_symlinks=False)
             temporary.unlink()
         else:
-            # Linux renameat2(RENAME_EXCHANGE) swaps the prepared file and the
+            # renameat2(RENAME_EXCHANGE) on Linux, renamex_np(RENAME_SWAP) on
+            # Darwin, swaps the prepared file and the
             # current destination in one syscall. Only after that atomic claim
             # do we inspect the displaced inode. A concurrent replacement is
             # immediately exchanged back and reported, never overwritten.
@@ -634,29 +637,66 @@ def _preserve_displaced_recovery(
     return recovery
 
 
+def _libc_function(name: str):
+    """One C library function of this process, or None (a seam the Darwin tests replace).
+
+    dlopen(NULL) finds libc on Linux and libSystem on Darwin; the named libc is
+    the fallback for an interpreter whose global namespace does not export it
+    (looked up only then: find_library can spawn ldconfig).
+    """
+    with contextlib.suppress(OSError):
+        function = getattr(ctypes.CDLL(None, use_errno=True), name, None)
+        if function is not None:
+            return function
+    found = ctypes.util.find_library("c")
+    if found:
+        with contextlib.suppress(OSError):
+            return getattr(ctypes.CDLL(found, use_errno=True), name, None)
+    return None
+
+
+# <sys/stdio.h> on Darwin: renamex_np(from, to, RENAME_SWAP) swaps two paths
+# atomically (APFS; a volume without VOL_CAP_INT_RENAME_SWAP answers ENOTSUP).
+DARWIN_RENAME_SWAP = 0x00000002
+# <linux/fs.h>: renameat2(..., RENAME_EXCHANGE).
+LINUX_AT_FDCWD = -100
+LINUX_RENAME_EXCHANGE = 2
+
+
 def _exchange_paths(left: Path, right: Path) -> None:
-    """Atomically exchange two paths, or fail without a portability downgrade."""
-    try:
-        renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
-    except AttributeError as error:
-        raise OSError(errno.ENOTSUP, "atomic path exchange is unavailable") from error
-    renameat2.argtypes = (
-        ctypes.c_int,
-        ctypes.c_char_p,
-        ctypes.c_int,
-        ctypes.c_char_p,
-        ctypes.c_uint,
-    )
-    renameat2.restype = ctypes.c_int
-    at_fdcwd = -100
-    rename_exchange = 2
-    if renameat2(
-        at_fdcwd,
-        os.fsencode(left),
-        at_fdcwd,
-        os.fsencode(right),
-        rename_exchange,
-    ) != 0:
+    """Atomically exchange two paths, or fail without a portability downgrade.
+
+    Linux uses renameat2(RENAME_EXCHANGE), Darwin renamex_np(RENAME_SWAP): the
+    same one-syscall swap. Anywhere else, or on a filesystem that cannot swap,
+    this raises before anything moved; there is no non-atomic fallback.
+    """
+    if sys.platform == "darwin":
+        renamex_np = _libc_function("renamex_np")
+        if renamex_np is None:
+            raise OSError(errno.ENOTSUP, "atomic path exchange is unavailable")
+        renamex_np.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+        renamex_np.restype = ctypes.c_int
+        result = renamex_np(os.fsencode(left), os.fsencode(right), DARWIN_RENAME_SWAP)
+    else:
+        renameat2 = _libc_function("renameat2")
+        if renameat2 is None:
+            raise OSError(errno.ENOTSUP, "atomic path exchange is unavailable")
+        renameat2.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        renameat2.restype = ctypes.c_int
+        result = renameat2(
+            LINUX_AT_FDCWD,
+            os.fsencode(left),
+            LINUX_AT_FDCWD,
+            os.fsencode(right),
+            LINUX_RENAME_EXCHANGE,
+        )
+    if result != 0:
         code = ctypes.get_errno()
         raise OSError(code, os.strerror(code))
 

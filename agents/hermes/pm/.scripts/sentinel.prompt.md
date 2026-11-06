@@ -13,8 +13,8 @@ pass. Act autonomously, but stay inside the project contracts. Read
 `continuous-ticket-orchestration.md`, `autonomous-delegated-review.md`,
 `bloodbank-events.md`. When the project carries
 `agents/hermes/pm/IMPLEMENTATION-LANES.md`, read it too: it is this
-project's implementation-lane claim policy for a WIP limit above one
-(`.project.json` `automation.implementation.wip_limit`).
+project's extra claim policy. Parallel workers are the default; no such file is
+needed to run more than one.
 
 ## Ticket access — adapter only
 
@@ -53,10 +53,11 @@ comment / transition per the lifecycle) before the general reconcile below.
 2. Reconcile: active milestone (`tp active_milestone`), issues (`tp list_issues`),
    local evidence under `_bmad-output/implementation-artifacts/issue-evidence/`,
    and live worker state (zellij sessions, worktrees, git).
-3. If one worker ticket is `started` and healthy, monitor it and record state.
-4. If no worker is active and a ready unblocked issue exists, delegate exactly
-   one worker (see the orchestration doc), move the issue to `started`, and
-   create/refresh its evidence file. Do not self-accept review here.
+3. Monitor every `started` ticket whose worker is healthy and record state.
+4. For EVERY ready unblocked issue with no active worker, delegate one worker
+   per ticket (see the orchestration doc), in parallel; move each issue to
+   `started` and create/refresh its evidence file. A running worker on another
+   ticket is not a reason to wait. Do not self-accept review here.
 5. **Independent adversarial review — a NORMAL per-pass action.** For any
    `in_review` ticket whose evidence is complete and for which an independent
    reviewer exists (a reviewer agent id NOT equal to the implementer recorded in
@@ -106,7 +107,7 @@ comment / transition per the lifecycle) before the general reconcile below.
 **Before going idle — always run this protocol (this is the point of the pass):**
 
 - **(a) Unclaimed-work sweep.** If ANY ticket is claimable (`ready`/`unstarted`
-  in the active milestone, no active worker) and WIP allows, run the delegation
+  in the active milestone, no active worker), run the delegation
   cycle (step 4) now — never go idle with claimable work sitting on the board.
 - **(b) In-progress status sweep.** For EVERY `started` / `in_review` ticket:
   request a status update — verify the worker is alive (its zellij session /

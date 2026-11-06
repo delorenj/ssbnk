@@ -29,12 +29,18 @@ PROFILE_DELTA_SEEDER="$ROLE_DIR/.scripts/lib/profile-config-seed.py"
 already_done 10-hermes-profile \
   && log "[10] profile marker found — revalidating required profile contract"
 
-# Select this role's owning project explicitly. Skillex alone resolves the
-# global/project union. PM roots do not admit local overrides.
+# Canonical project identity and the desk's strict loadout are separate inputs.
 PROJECT_PATH="$(project_repo_path)" \
   || die "cannot resolve the owning project; set PJANGLER_PROJECT_ROOT explicitly"
-[[ -f "$PROJECT_PATH/.agents/skills.json" ]] \
-  || die "project selection is missing: $PROJECT_PATH/.agents/skills.json; run skillex init --project '$PROJECT_PATH'"
+SKILLEX_PROJECT_PATH="$PROJECT_PATH"
+if [[ -e "$PROFILE_HOME/.skillex-selection" || -L "$PROFILE_HOME/.skillex-selection" ]]; then
+  [[ -d "$PROFILE_HOME/.skillex-selection" && ! -L "$PROFILE_HOME/.skillex-selection" ]] \
+    || die "role selection must be a real directory: $PROFILE_HOME/.skillex-selection"
+  SKILLEX_PROJECT_PATH="$PROFILE_HOME/.skillex-selection"
+elif [[ -d "$PROFILE_HOME" ]]; then
+  # Let Skillex read its existing receipt instead of rebinding it to this repo.
+  SKILLEX_PROJECT_PATH=""
+fi
 SKILLEX_BIN="${SKILLEX_BIN:-skillex}"
 command -v "$SKILLEX_BIN" >/dev/null 2>&1 \
   || die "install a Skillex build supporting profile sync --skillex-only"
@@ -47,18 +53,15 @@ command -v "$SKILLEX_BIN" >/dev/null 2>&1 \
 # bytes, or the sync refuses with E_DIVERGENT_CANONICAL_NAME when the global
 # selection names the same skill. Receipts already record this checkout.
 if [[ -z "${PJ_SKILLS_REGISTRY_ROOT:-}" ]]; then
-  PJ_SKILLS_REGISTRY_ROOT="$(config_get skillex.registry_root "$HOME/code/skillex")"
-  PJ_SKILLS_REGISTRY_ROOT="${PJ_SKILLS_REGISTRY_ROOT/#\~/$HOME}"
+  # HERMES_SKILLEX_REPO resolves env > [skillex] registry_root > $HERMES_CODE_ROOT/skillex (_lib.sh).
+  PJ_SKILLS_REGISTRY_ROOT="${HERMES_SKILLEX_REPO/#\~/$HOME}"
 fi
 [[ -d "$PJ_SKILLS_REGISTRY_ROOT/all-skills" ]] \
   || die "canonical Skillex catalog not found at $PJ_SKILLS_REGISTRY_ROOT/all-skills; set PJ_SKILLS_REGISTRY_ROOT or [skillex] registry_root in $HERMES_TEMPLATE_CONFIG"
 export PJ_SKILLS_REGISTRY_ROOT
 
-PROFILE_RENDERER="${PROFILE_RENDERER:-$HOME/code/33GOD/hermes-agent-template/scripts/hermes-profile-config.py}"
-SKILLS_POLICY="$ROLE_DIR/.scripts/lib/skills-policy.py"
-[[ -f "$SKILLS_POLICY" && ! -L "$SKILLS_POLICY" ]] \
-  || die "trusted PM skills policy helper is unavailable: $SKILLS_POLICY"
-CUTOVER_HINT="python3 $PJ_SKILLS_REGISTRY_ROOT/scripts/hermes-skillex-cutover.py --profile $PROFILE_NAME --project '$PROJECT_PATH' --registry-root $PJ_SKILLS_REGISTRY_ROOT --renderer ~/code/33GOD/hermes-agent-template/scripts/hermes-profile-config.py (preview, then --apply)"
+PROFILE_RENDERER="${PROFILE_RENDERER:-$HERMES_TEMPLATE_REPO/scripts/hermes-profile-config.py}"
+CUTOVER_HINT="python3 $PJ_SKILLS_REGISTRY_ROOT/scripts/hermes-skillex-cutover.py --profile $PROFILE_NAME --project '$PROJECT_PATH' --registry-root $PJ_SKILLS_REGISTRY_ROOT --renderer $HERMES_TEMPLATE_REPO/scripts/hermes-profile-config.py (preview, then --apply)"
 
 # Read-only Skillex preflight of an existing profile. Exit 0 is converged and
 # exit 6 is a pending sync (a selection change or catalog bump), which is what
@@ -67,20 +70,60 @@ CUTOVER_HINT="python3 $PJ_SKILLS_REGISTRY_ROOT/scripts/hermes-skillex-cutover.py
 SKILLEX_SHOW_JSON=""
 skillex_preflight() {
   local rc=0
-  SKILLEX_SHOW_JSON="$("$SKILLEX_BIN" profile show "$PROFILE_NAME" --project "$PROJECT_PATH" --json)" || rc=$?
+  local -a selection_args=()
+  [[ -z "$SKILLEX_PROJECT_PATH" ]] || selection_args=(--project "$SKILLEX_PROJECT_PATH")
+  SKILLEX_SHOW_JSON="$("$SKILLEX_BIN" profile show "$PROFILE_NAME" "${selection_args[@]}" --json)" || rc=$?
   if [[ $rc -ne 0 && $rc -ne 6 ]]; then
     printf '%s\n' "$SKILLEX_SHOW_JSON"
     die "legacy/invalid skills (skillex profile show exit $rc); use the preservation-first Skillex cutover: $CUTOVER_HINT"
+  fi
+  if [[ -z "$SKILLEX_PROJECT_PATH" ]]; then
+    SKILLEX_PROJECT_PATH="$(python3 -I - "$SKILLEX_SHOW_JSON" "$PROJECT_PATH" <<'PYEOF'
+import json, sys
+data = (json.loads(sys.argv[1]) or {}).get("data") or {}
+project = data.get("project")
+if project is not None and (not isinstance(project, str) or not project.strip()):
+    raise SystemExit("Skillex receipt project must be a non-empty path")
+print(project or sys.argv[2])
+PYEOF
+    )" || die "cannot read the recorded Skillex selection project"
+    [[ -f "$SKILLEX_PROJECT_PATH/.agents/skills.json" ]] \
+      || die "project selection is missing: $SKILLEX_PROJECT_PATH/.agents/skills.json; run skillex init --project '$SKILLEX_PROJECT_PATH'"
+    # A receipt-less desk's first preview may have used the ambient cwd.
+    # Validate its explicitly chosen initial selection before any mutation.
+    rc=0
+    SKILLEX_SHOW_JSON="$("$SKILLEX_BIN" profile show "$PROFILE_NAME" --project "$SKILLEX_PROJECT_PATH" --json)" || rc=$?
+    if [[ $rc -ne 0 && $rc -ne 6 ]]; then
+      printf '%s\n' "$SKILLEX_SHOW_JSON"
+      die "legacy/invalid skills (skillex profile show exit $rc); use the preservation-first Skillex cutover: $CUTOVER_HINT"
+    fi
   fi
 }
 
 # Strict sync: preview first, then apply. Both refuse foreign skills/ content
 # and non-empty skills.external_dirs without changing anything.
 strict_skill_sync() {
-  "$SKILLEX_BIN" profile sync "$PROFILE_NAME" --project "$PROJECT_PATH" \
+  [[ -f "$SKILLEX_PROJECT_PATH/.agents/skills.json" ]] \
+    || die "project selection is missing: $SKILLEX_PROJECT_PATH/.agents/skills.json; run skillex init --project '$SKILLEX_PROJECT_PATH'"
+  "$SKILLEX_BIN" profile sync "$PROFILE_NAME" --project "$SKILLEX_PROJECT_PATH" \
     --skillex-only --dry-run || die "strict skill preflight refused; no profile state changed"
-  "$SKILLEX_BIN" profile sync "$PROFILE_NAME" --project "$PROJECT_PATH" \
+  "$SKILLEX_BIN" profile sync "$PROFILE_NAME" --project "$SKILLEX_PROJECT_PATH" \
     --skillex-only || die "strict skill sync refused"
+}
+
+# A runtime blocker applies only to the extra project binding. Strict desk
+# provisioning continues, and every rerun reassesses the actual fleet pin.
+project_skills_policy() {
+  local rc=0 message
+  message="$(python3 -I "$PROFILE_RENDERER" project-skills --profile "$PROFILE_NAME" \
+    --project-root "$PROJECT_PATH" --role-dir "$ROLE_DIR")" || rc=$?
+  if [[ $rc -eq 3 ]]; then
+    warn "$message"
+  elif [[ $rc -ne 0 ]]; then
+    die "project skills preflight failed: $message"
+  else
+    log "$message"
+  fi
 }
 
 log "[10] creating hermes profile: $PROFILE_NAME"
@@ -117,6 +160,8 @@ PYEOF
     log "    existing profile is not yet Skillex-only; resuming provisioning"
   fi
 else
+  [[ -f "$SKILLEX_PROJECT_PATH/.agents/skills.json" ]] \
+    || die "project selection is missing: $SKILLEX_PROJECT_PATH/.agents/skills.json; run skillex init --project '$SKILLEX_PROJECT_PATH'"
   # `--clone` copies the default profile's .env before a provisioner can
   # inspect it, transiently materializing every credential in the new profile.
   # Start clean; required skills and the project SOUL are installed below.
@@ -163,8 +208,9 @@ fi
 if [[ "$STRICT_DESK" == "1" ]]; then
   [[ -f "$PROFILE_RENDERER" && ! -L "$PROFILE_RENDERER" ]] \
     || die "canonical config renderer required for PM skill policy: $PROFILE_RENDERER"
-  python3 -I "$SKILLS_POLICY" "$PROFILE_HOME" "$PROFILE_RENDERER" \
+  python3 -I "$PROFILE_RENDERER" skills-policy --profile "$PROFILE_NAME" \
     || die "could not keep isolated PM discovery"
+  project_skills_policy
   strict_skill_sync
   mark_done 10-hermes-profile
   exit 0
@@ -174,7 +220,9 @@ fi
 # The generated launchers pass TERMINAL_CWD process-locally instead.
 #
 # config.yaml is GENERATED, never hand-written and never a symlink to the fleet
-# base. It is deep_merge(~/.hermes/config.yaml, <profile>/config.delta.yaml).
+# base. It is the renderer's expected_config: the merge of ~/.hermes/config.yaml and
+# <profile>/config.delta.yaml plus the renderer pins (terminal.cwd from the registry row, which
+# 80-registry.sh writes and then re-pins for a fresh hire).
 # The old symlink-to-base topology was actively harmful: Hermes' atomic writes
 # use os.replace, which REPLACES a symlink with a regular file, so the first
 # in-agent write (/model, onboarding, a config migration) silently detached the
@@ -305,8 +353,9 @@ fi
 # then Skillex publishes the strict markers with the first strict sync.
 [[ -f "$PROFILE_RENDERER" && ! -L "$PROFILE_RENDERER" ]] \
   || die "canonical config renderer required for PM skill policy: $PROFILE_RENDERER"
-python3 -I "$SKILLS_POLICY" "$PROFILE_HOME" "$PROFILE_RENDERER" \
+python3 -I "$PROFILE_RENDERER" skills-policy --profile "$PROFILE_NAME" \
   || die "could not establish isolated PM discovery"
+project_skills_policy
 strict_skill_sync
 
 mark_done 10-hermes-profile

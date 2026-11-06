@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Capture a BotFather token and wire it into the runtime profile.
 #
+# bash >= 4.4 before anything else: lib/bash-guard.sh re-execs this step under
+# a modern bash (macOS /bin/bash is 3.2) and must run BEFORE the invocation
+# credentials below are captured and unset, or the re-exec would lose them.
+# Builtins only: no child process may see the still-exported credentials.
+case "$0" in */*) HAT_GUARD="${0%/*}/lib/bash-guard.sh" ;; *) HAT_GUARD="lib/bash-guard.sh" ;; esac
+if [[ -f "$HAT_GUARD" && ! -L "$HAT_GUARD" ]]; then
+  # shellcheck source=lib/bash-guard.sh
+  builtin source "$HAT_GUARD"
+fi
+unset HAT_GUARD
+#
 # Telegram credentials are invocation-only inputs. Capture them before _lib.sh
 # sources fleet.env so a token parked in shared fleet state can never provision
 # or be silently reused by a profile. The non-secret allow-list may be shared.
@@ -229,16 +240,41 @@ print("{}\t{}".format(
 IFS=$'\t' read -r bot_id bot_username <<< "$identity"
 log "    verified: @$bot_username (id=$bot_id)"
 
-# Resolve operator's allowed user id before taking the fleet claim lock.
+# Resolve the bot's allow-list before taking the fleet claim lock.
+#
+# Sources, first non-empty wins: the invocation's TELEGRAM_ALLOWED_USERS, then
+# fleet.env (both captured above), then a TELEGRAM_ALLOWED_USERS line in
+# ~/.hermes/.env. The operator ids ([telegram] operator_user_ids in
+# config.toml, built-in fallback: the fleet's creator) are then ALWAYS
+# appended: every bot answers its creator, whatever else is configured, so a
+# freshly wired bot can never come up denying everyone.
+#
+# The ~/.hermes/.env lookup must tolerate "no such line": under errexit +
+# pipefail a grep that matches nothing used to kill this step silently, right
+# after the "verified:" log line, with exit 1 and no message.
 if [[ -z "${TELEGRAM_ALLOWED_USERS:-}" && -f "$HOME/.hermes/.env" ]]; then
-  TELEGRAM_ALLOWED_USERS=$(grep -E '^[[:space:]]*#?[[:space:]]*TELEGRAM_ALLOWED_USERS=' "$HOME/.hermes/.env" \
+  TELEGRAM_ALLOWED_USERS=$( { grep -E '^[[:space:]]*#?[[:space:]]*TELEGRAM_ALLOWED_USERS=' "$HOME/.hermes/.env" || true; } \
     | tail -1 | sed -E 's/^[[:space:]]*#?[[:space:]]*TELEGRAM_ALLOWED_USERS=//; s/^"//; s/"$//')
 fi
-if [[ -z "${TELEGRAM_ALLOWED_USERS:-}" && -t 0 ]]; then
-  read -r -p "Your Telegram user id (allow-list for this bot): " TELEGRAM_ALLOWED_USERS
-fi
-if [[ -z "${TELEGRAM_ALLOWED_USERS:-}" ]]; then
-  warn "    Telegram is wired but denies all inbound users until TELEGRAM_ALLOWED_USERS is set"
+TELEGRAM_OPERATOR_USER_IDS="$(config_get telegram.operator_user_ids "$TELEGRAM_DEFAULT_OPERATOR_USER_IDS")"
+telegram_allow_list() {
+  local -a ids=() out=()
+  local -A seen=()
+  local id
+  IFS=$', \t' read -r -a ids <<<"$*"
+  for id in "${ids[@]}"; do
+    [[ -n "$id" && -z "${seen[$id]:-}" ]] || continue
+    seen[$id]=1
+    out+=("$id")
+  done
+  local IFS=,
+  printf '%s' "${out[*]}"
+}
+TELEGRAM_ALLOWED_USERS="$(telegram_allow_list "${TELEGRAM_ALLOWED_USERS:-}" "$TELEGRAM_OPERATOR_USER_IDS")"
+if [[ -z "$TELEGRAM_ALLOWED_USERS" ]]; then
+  warn "    Telegram is wired but denies all inbound users: no TELEGRAM_ALLOWED_USERS and no [telegram] operator_user_ids"
+else
+  log "    allow-list: $TELEGRAM_ALLOWED_USERS"
 fi
 
 # Reject token reuse, token rotation onto an identity owned by another agent,
@@ -273,9 +309,18 @@ if token.endswith("\n"):
     token = token[:-1]
 if not token:
     raise SystemExit("Telegram ownership scan received no credential")
-for metadata_path in (pathlib.Path("/proc/self/cmdline"), pathlib.Path("/proc/self/environ")):
-    if metadata_path.is_file() and token.encode() in metadata_path.read_bytes():
-        raise SystemExit("Telegram ownership scan detected credential exposure in process metadata")
+def process_metadata():
+    # Linux: the kernel's view of this process's argv and initial environment.
+    # Without /proc (macOS) the interpreter's own copies of the same two.
+    procfs = (pathlib.Path("/proc/self/cmdline"), pathlib.Path("/proc/self/environ"))
+    if any(path.is_file() for path in procfs):
+        return [path.read_bytes() for path in procfs if path.is_file()]
+    return [
+        b"\0".join(os.fsencode(arg) for arg in getattr(sys, "orig_argv", sys.argv)),
+        b"\0".join(key + b"=" + value for key, value in os.environb.items()),
+    ]
+if any(token.encode() in metadata for metadata in process_metadata()):
+    raise SystemExit("Telegram ownership scan detected credential exposure in process metadata")
 target = pathlib.Path(target_path).resolve(strict=False)
 
 def env_token(path):

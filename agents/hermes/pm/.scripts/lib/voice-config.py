@@ -124,58 +124,37 @@ def load_mapping(path: pathlib.Path, *, required: bool = True) -> dict:
     return data
 
 
-def plain_merge(base: dict, override: dict) -> dict:
-    result = copy.deepcopy(base)
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = plain_merge(result[key], value)
-        elif key in result and isinstance(result[key], dict) and value is None:
-            continue
-        else:
-            result[key] = copy.deepcopy(value)
-    return result
+_CANONICAL_RENDERER = None
 
 
-def apply_list_patches(result: dict, directive: object) -> None:
-    if directive is None:
-        return
-    if not isinstance(directive, dict):
-        raise ContractError(f"{LIST_PATCH_KEY} must be a mapping")
-    patches = directive.get("list_patches", {})
-    if not isinstance(patches, dict):
-        raise ContractError(f"{LIST_PATCH_KEY}.list_patches must be a mapping")
-    for dotted, rule in patches.items():
-        if not isinstance(dotted, str) or not dotted or not isinstance(rule, dict):
-            raise ContractError("invalid list patch")
-        additions = rule.get("add", []) or []
-        removals = rule.get("remove", []) or []
-        if not isinstance(additions, list) or not isinstance(removals, list) or not all(
-            isinstance(item, str) for item in [*additions, *removals]
-        ):
-            raise ContractError(f"list patch for {dotted} must contain string lists")
-        cursor = result
-        parts = dotted.split(".")
-        for part in parts[:-1]:
-            child = cursor.setdefault(part, {})
-            if not isinstance(child, dict):
-                raise ContractError(f"list patch parent for {dotted} is not a mapping")
-            cursor = child
-        current = cursor.get(parts[-1], []) or []
-        if not isinstance(current, list):
-            raise ContractError(f"list patch target {dotted} is not a list")
-        removed = set(removals)
-        merged = [item for item in current if item not in removed]
-        for item in additions:
-            if item not in merged:
-                merged.append(item)
-        cursor[parts[-1]] = merged
+def canonical_renderer(fleet: pathlib.Path):
+    """THE renderer (scripts/hermes-profile-config.py) bound to *fleet*; never a private merge.
+
+    The generated config is ``expected_config(base, delta, profile)`` -- the Hermes merge plus every
+    renderer pin. This helper's own merge copy once rewrote config.yaml without ``terminal.cwd``.
+    """
+    global _CANONICAL_RENDERER
+    if _CANONICAL_RENDERER is None:
+        source = pathlib.Path(__file__).with_name("profile-renderer.py")
+        if source.is_symlink() or not source.is_file():
+            raise ContractError(f"trusted profile renderer locator is unavailable: {source}")
+        spec = importlib.util.spec_from_file_location("pjangler_profile_renderer_locator", source)
+        if spec is None or spec.loader is None:
+            raise ContractError(f"cannot load profile renderer locator: {source}")
+        locator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(locator)
+        try:
+            _CANONICAL_RENDERER = locator.load(fleet)
+        except RuntimeError as exc:
+            raise ContractError(str(exc)) from exc
+    return _CANONICAL_RENDERER
 
 
-def merge(base: dict, delta: dict) -> dict:
-    ordinary = {key: value for key, value in delta.items() if key != LIST_PATCH_KEY}
-    result = plain_merge(base, ordinary)
-    apply_list_patches(result, delta.get(LIST_PATCH_KEY))
-    return result
+def merge(base: dict, delta: dict, base_path: pathlib.Path, profile: pathlib.Path) -> dict:
+    try:
+        return canonical_renderer(base_path.parent).expected_config(base, delta, profile.name)
+    except ValueError as exc:
+        raise ContractError(str(exc)) from exc
 
 
 def role_transform(values: tuple[str, ...], role_plugin: str) -> tuple[str, ...]:
@@ -389,12 +368,15 @@ def render_delta(delta: dict, original: bytes) -> bytes:
     ).encode("utf-8")
 
 
-def render_generated(base: dict, delta: dict) -> bytes:
+def render_generated(
+    base: dict, delta: dict, base_path: pathlib.Path, profile: pathlib.Path
+) -> bytes:
     header = (
         "# GENERATED FILE -- DO NOT EDIT.\n"
         "# source: fleet config.yaml + profile config.delta.yaml\n"
     )
-    return (header + yaml.safe_dump(merge(base, delta), sort_keys=False)).encode("utf-8")
+    rendered = merge(base, delta, base_path, profile)
+    return (header + yaml.safe_dump(rendered, sort_keys=False)).encode("utf-8")
 
 
 def snapshot(path: pathlib.Path, mode: int) -> FileSnapshot:
@@ -481,7 +463,7 @@ def reconcile(args: argparse.Namespace) -> int:
         delta = load_mapping(delta_path, required=False)
         reconcile_delta(delta, args.plugin, args.voice)
         delta_content = render_delta(delta, delta_original.content)
-        generated_content = render_generated(base, delta)
+        generated_content = render_generated(base, delta, base_path, profile)
         try:
             atomic_write(delta_path, delta_content)
             atomic_write(generated_path, generated_content)
@@ -503,7 +485,7 @@ def check(args: argparse.Namespace) -> int:
             reconcile_delta(expected_delta, args.plugin, args.voice)
             generated = load_mapping(generated_path, required=False)
             if expected_delta == original_delta and generated == merge(
-                base, expected_delta
+                base, expected_delta, base_path, profile
             ):
                 print("ok")
             else:

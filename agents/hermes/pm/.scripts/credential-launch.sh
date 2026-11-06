@@ -1,13 +1,35 @@
 #!/usr/bin/env bash
-# Secret-free systemd entrypoint. Decrypted values are read only from the
-# service manager's volatile credential directory and never printed or written.
+# Secret-free launcher for the per-agent HEARTBEAT pass. Decrypted values are read
+# only from the service manager's volatile credential directory and never printed
+# or written.
+#
+# GATEWAY MODE IS RETIRED (2026-10-11). It used to be a per-agent unit's ExecStart
+# (`gateway run --replace`). Since then ONE host unit, hermes-gateway.service,
+# serves every profile and execs the hermes binary directly, never this script. A
+# per-agent unit pointing here would `--replace` and take over the host gateway
+# (james-brennan-pm 2026-10-20 blocked Bloodbank for 3h; tolt-pm 2026-11-02 put
+# the host unit in a ~975-restart loop), so `gateway` now refuses unconditionally.
 set -euo pipefail
+
+mode="${1:-}"
+if [[ "$mode" == "gateway" ]]; then
+  {
+    printf 'credential-launch: gateway mode is retired and refuses to run.\n'
+    printf '  ONE host gateway, hermes-gateway.service, serves every profile; a per-agent\n'
+    printf '  `gateway run --replace` would take it over. Profiles are attached through the\n'
+    printf '  control socket (~/.hermes/gateway.sock). To pick up a change, run once:\n'
+    printf '      hermes-gateway-restart --reason "<why>"\n'
+  } >&2
+  exit 64
+fi
+[[ "$mode" == "heartbeat" ]] \
+  || { printf 'credential-launch: expected heartbeat (gateway mode is retired)\n' >&2; exit 2; }
 
 ROLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ROLE_YAML="$ROLE_DIR/role.yaml"
 
 # The block-scoped walker _lib.sh's yaml_get uses (lib/role-yaml.py). This
-# launcher is the gateway's ExecStart, so it calls the reader directly instead
+# launcher was the gateway's ExecStart, so it calls the reader directly instead
 # of sourcing _lib.sh and its fleet environment. The regex reader it replaces
 # ended a block at the first blank line and kept trailing comments.
 ROLE_YAML_READER="$ROLE_DIR/.scripts/lib/role-yaml.py"
@@ -23,10 +45,6 @@ PROFILE_NAME="$(yaml_get profile)"
   || { printf 'credential-launch: incomplete role identity\n' >&2; exit 2; }
 [[ -n "${HERMES_BIN:-}" && -x "$HERMES_BIN" ]] \
   || { printf 'credential-launch: HERMES_BIN is not executable\n' >&2; exit 1; }
-
-mode="${1:-}"
-[[ "$mode" == "gateway" || "$mode" == "heartbeat" ]] \
-  || { printf 'credential-launch: expected gateway or heartbeat\n' >&2; exit 2; }
 
 FLEET_HOME="${HERMES_FLEET_HOME:-$HOME/.hermes}"
 PROFILE_HOME="$FLEET_HOME/profiles/${PROFILE_NAME:-$AGENT_ID}"
@@ -61,28 +79,4 @@ if [[ -n "$MODEL_KEY_ENV" ]]; then
   load_credential model_api_key "$MODEL_KEY_ENV"
 fi
 
-if [[ "$mode" == "heartbeat" ]]; then
-  exec "$ROLE_DIR/.scripts/heartbeat.sh"
-fi
-
-gateway_args=(gateway run --replace)
-MODEL_NAME="$(yaml_get model.name)"
-MODEL_PROVIDER="$(yaml_get model.provider)"
-MODEL_BASE_URL="$(yaml_get model.base_url)"
-MODEL_API_MODE="$(yaml_get model.api_mode)"
-[[ -z "$MODEL_NAME" ]] || gateway_args+=(--model "$MODEL_NAME")
-[[ -z "$MODEL_PROVIDER" ]] || gateway_args+=(--provider "$MODEL_PROVIDER")
-[[ -z "$MODEL_BASE_URL" ]] || gateway_args+=(--base-url "$MODEL_BASE_URL")
-[[ -z "$MODEL_API_MODE" ]] || gateway_args+=(--api-mode "$MODEL_API_MODE")
-[[ -z "$MODEL_KEY_ENV" ]] || gateway_args+=(--key-env "$MODEL_KEY_ENV")
-
-# Put the profile on argv. `hermes profile list` identifies a gateway by its
-# COMMAND LINE (gateway/status.py::_command_line_belongs_to_profile): a named
-# profile must carry -p/--profile there, and HERMES_HOME in the environment is
-# explicitly not enough. Without this the gateway runs fine but every status
-# surface reports it "stopped" -- silently, with nothing in any log.
-if [[ "${HERMES_HOME:-}" == */.hermes/profiles/* ]]; then
-  gateway_args=(-p "$(basename "$HERMES_HOME")" "${gateway_args[@]}")
-fi
-
-exec "$HERMES_BIN" "${gateway_args[@]}"
+exec "$ROLE_DIR/.scripts/heartbeat.sh"

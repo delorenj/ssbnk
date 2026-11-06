@@ -28,7 +28,9 @@ PROFILE_NAME="${HERMES_PROFILE_NAME:-ssbnk-pm}"
 # _global_auth_file_path() return None — silently disabling shared fleet auth
 # and giving the agent a divergent config.yaml. The profile dir is a REAL dir
 # whose shared entries (.env, skills) symlink to the fleet root and whose owned
-# entries (memories, sessions, state.db, ...) symlink into $RUNTIME_HOME.
+# entries (memories, sessions, SOUL.md, ...) symlink into $RUNTIME_HOME. state.db
+# is the exception: the real store stays in the profile (Hermes refuses one that
+# resolves outside it) and $RUNTIME_HOME/state.db links back to it.
 #
 # config.yaml is NOT symlinked — it is GENERATED as
 # deep_merge(fleet config.yaml, <profile>/config.delta.yaml). Symlinking it
@@ -76,6 +78,7 @@ HERMES_BIN="${HERMES_BIN:-${HERMES_FLEET_BIN:-}}"
 if [[ -z "$HERMES_BIN" ]]; then
   HERMES_BIN="$(config_get fleet.hermes_bin "")"
 fi
+# ONE install, ONE binary: the same launcher hermes-gateway.service execs (drift guard: scripts/hermes-single-install-check.py).
 HERMES_BIN="${HERMES_BIN:-$HOME/.hermes/hermes-agent/.hermes/bin/hermes}"
 CODEX_HOME="${CODEX_HOME:-${HERMES_FLEET_CODEX_HOME:-$(config_get fleet.codex_home "$HOME/.codex")}}"
 

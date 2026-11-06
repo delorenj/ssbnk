@@ -4,7 +4,7 @@
 source "$(dirname "$0")/_lib.sh"
 load_role_env
 
-GW_UNIT="hermes-${AGENT_ID}-gateway.service"
+GW_UNIT="$HOST_GATEWAY_UNIT"
 HB_TIMER="hermes-${AGENT_ID}-heartbeat.timer"
 GW_STATE="$(yaml_get service_state.gateway)"
 HB_STATE="$(yaml_get service_state.heartbeat)"
@@ -17,18 +17,17 @@ BOARD_ID="$(yaml_get ticket_provider.board_id)"
 # Reconcile durable claims with live unit truth at presentation time.  A stale
 # role.yaml must never turn an exited launcher or failed heartbeat into an
 # operational summary.
-if [[ "$GW_STATE" =~ ^(active|deferred)$ ]]; then
-  if systemd_user_available; then
-    if [[ "$GW_STATE" == "active" ]]; then
-      gw_live="$(systemd_service_health_snapshot "$GW_UNIT" running)"
-      [[ "$gw_live" == ok\|* ]] || GW_STATE="error (stale active claim)"
-    elif [[ "$GW_STATE" == "deferred" ]]; then
-      gw_live="$(systemd_gateway_deferred_snapshot "$GW_UNIT")"
-      [[ "$gw_live" == "ok|deferred" ]] || GW_STATE="error (stale deferred claim)"
-    fi
-  else
-    [[ "$GW_STATE" != "active" && "$GW_STATE" != "deferred" ]] \
-      || GW_STATE="unverified (user manager unavailable)"
+if [[ "$GW_STATE" =~ ^(active|deferred)$ && "$(host_os)" == "Darwin" ]]; then
+  # launchd: one multiplexed gateway for the host, not a per-agent unit.
+  GW_UNIT="ai.hermes.gateway (launchd, multiplexed)"
+  if [[ "$GW_STATE" == "active" ]]; then
+    [[ "$(launchd_gateway_snapshot)" == "ok|supervised" ]] || GW_STATE="error (stale active claim)"
+  fi
+elif [[ "$GW_STATE" =~ ^(active|deferred)$ ]]; then
+  # systemd: also one multiplexed host gateway, never a per-agent unit.
+  if [[ "$GW_STATE" == "active" ]]; then
+    gw_live="$(host_gateway_probe "${PROFILE_NAME:-$AGENT_ID}" 0)"
+    [[ "$gw_live" == ok\|serving\|* ]] || GW_STATE="error (stale active claim)"
   fi
 fi
 
@@ -71,10 +70,15 @@ if [[ "$GW_STATE" == "deferred" ]]; then
   cat >&2 <<EOF
 │
 │  Gateway activation is deferred. Store and verify a dedicated Telegram or
-│  Slack credential through the provisioner; do not start $GW_UNIT manually.
+│  Slack credential through the provisioner. No per-agent gateway is ever
+│  started: the host gateway ($GW_UNIT) serves every profile.
 EOF
 elif [[ "$GW_STATE" == "active" ]]; then
-  printf '│  Gateway log:    journalctl --user -fu %s\n' "$GW_UNIT" >&2
+  if [[ "$(host_os)" == "Darwin" ]]; then
+    printf '│  Gateway log:    tail -f %s/logs/gateway.log\n' "${HERMES_FLEET_HOME:-$HOME/.hermes}" >&2
+  else
+    printf '│  Gateway log:    journalctl --user -fu %s\n' "$GW_UNIT" >&2
+  fi
 fi
 
 cat >&2 <<'EOF'

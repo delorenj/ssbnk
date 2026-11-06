@@ -17,6 +17,7 @@ though the deliberately persistent lock file remains on disk.
 from __future__ import annotations
 
 import fcntl
+import math
 import os
 import pathlib
 import stat
@@ -51,9 +52,9 @@ def _timeout_seconds() -> float:
         raise ProfileConfigLockError(
             f"{LOCK_TIMEOUT_ENV} must be a non-negative number"
         ) from exc
-    if timeout < 0 or timeout != timeout:
+    if timeout < 0 or not math.isfinite(timeout):
         raise ProfileConfigLockError(
-            f"{LOCK_TIMEOUT_ENV} must be a non-negative number"
+            f"{LOCK_TIMEOUT_ENV} must be a finite non-negative number"
         )
     return timeout
 
@@ -65,6 +66,8 @@ class ProfileConfigLock:
         self.profile = pathlib.Path(profile)
         self.path = lock_path(self.profile)
         self.timeout = _timeout_seconds() if timeout is None else timeout
+        if self.timeout < 0 or not math.isfinite(self.timeout):
+            raise ProfileConfigLockError("profile config lock timeout must be finite and non-negative")
         self.fd: int | None = None
 
     def acquire(self) -> Self:

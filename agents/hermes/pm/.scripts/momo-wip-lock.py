@@ -2,10 +2,11 @@
 """momo-wip-lock — shared board-driver lease so interactive Momo and the Hermes
 sentinel never double-drive one board (momo E2/S2.3, the coexistence gate).
 
-It serializes short board selection and transitions only. Implementation
-capacity and ticket ownership are separate: `.project.json`
-`automation.implementation.wip_limit` sets the capacity (default one), and a
-project that raises it claims each ticket per its IMPLEMENTATION-LANES.md.
+It is NOT a WIP limit. It serializes short board selection and transitions
+only, so two drivers never write the board in the same instant. It never gates
+how many tickets are in progress and must never be used to refuse dispatching a
+different ready ticket: a PM runs many workers in parallel, one owner per
+ticket. (The file keeps its `wip` name so deployed desks keep working.)
 Release this driver lease before waiting on workers.
 
 Both drivers acquire the SAME advisory lease (a JSON file, conventionally

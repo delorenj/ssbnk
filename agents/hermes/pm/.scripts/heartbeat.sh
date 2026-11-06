@@ -2,7 +2,11 @@
 # Unified agent heartbeat: continuous board-reconciliation sentinel pass +
 # board-reconciliation pass.
 #
-# Runs often (systemd timer, ~1 min). Only invokes Hermes for a full
+# RETIRED AS A SCHEDULE (2026-09-17 the per-agent systemd timer; 2026-10-11 the
+# single-clock rule): nothing installs a heartbeat timer, cron entry or loop for
+# this script any more. Recurring work is a Candybar manifest (the one clock);
+# this script only runs when something invokes it on purpose. Do not create a
+# second clock for it. Historical behaviour follows. Only invokes Hermes for a full
 # reconciliation pass when local state says no worker is active, the worker
 # heartbeat is stale, or the last full run is outside the cooldown window. The
 # full pass executes the role's sentinel.prompt.md, which reasons about tickets
@@ -143,28 +147,9 @@ if status in {"blocked","stalled","error"}:
         or iso_epoch(state.get("last_runner_completed_at")) or iso_epoch(state.get("updated_at")))
     if last_blocked_run and (now - last_blocked_run) < blocked_full_run_cooldown:
         print("skip:blocker-cooldown"); raise SystemExit(0)
-if status in {"active","delegated","working"} and session:
-    process_active = False
-    try:
-        result = subprocess.run(["ps","-u",str(__import__("os").getuid()),"-o","pid=,command="],
-            check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5)
-        markers = ("codex exec","opencode run","auggie","gemini","kimi","copilot")
-        process_active = any(((session and session in line) or (worktree and worktree in line))
-            and any(m in line for m in markers) for line in result.stdout.splitlines())
-    except Exception: process_active = False
-    # Per-session liveness. zellij 0.44 has NO per-session log: there is one
-    # global log under /tmp/zellij-$UID/zellij-log/. The path this used to read
-    # (~/.local/state/zellij/sessions/<s>/zellij.log) never exists, so
-    # log_recent was silently always False. session-metadata.kdl IS
-    # per-session and is rewritten every serialization tick (60s default),
-    # well inside the active_max_idle window. (Found and fixed in skillex-pm.)
-    log_path = Path.home()/".cache"/"zellij"/"contract_version_1"/"session_info"/session/"session-metadata.kdl"
-    log_recent = log_path.exists() and (now - log_path.stat().st_mtime) <= active_max_idle
-    marker_recent = False
-    last_activity = iso_epoch(state.get("last_activity_at")) or iso_epoch(state.get("updated_at"))
-    if last_activity: marker_recent = (now - last_activity) <= active_max_idle
-    if process_active and (log_recent or marker_recent):
-        print("skip:active-worker"); raise SystemExit(0)
+# No "a worker is already running, skip" gate: a PM orchestrates many tickets in
+# parallel, so a healthy worker on one ticket must never stop a pass that would
+# dispatch a different ready ticket. The cooldown below is the only throttle.
 last_full_run = float(state.get("last_full_run_epoch") or 0)
 if last_full_run and (now - last_full_run) < full_run_cooldown: print("skip:cooldown")
 else: print("run:full")
@@ -210,12 +195,13 @@ state.update({"source":"hermes-continuous-ticket-sentinel","agent_id":agent_id,"
 tmp = path.with_suffix(path.suffix + ".tmp"); tmp.write_text(json.dumps(state, indent=2, sort_keys=True)+"\n"); tmp.replace(path)
 PYEOF
 
-# Coexistence WIP=1 lease (momo E2/S2.3): don't full-drive if the human-drivable
-# Momo holds it — it's driving the same board. A crashed holder's lease expires
+# Board-driver lease (momo E2/S2.3; not a WIP limit): serializes short board
+# selection/transition passes. Don't full-drive if the human-drivable Momo holds
+# it — it's driving the same board right now. A crashed holder's lease expires
 # (ttl) so the board is never wedged. Release on any exit.
 WIP_LOCK="$RUNTIME/wip-driver.lock"
 if ! python3 "$ROLE_DIR/.scripts/momo-wip-lock.py" acquire "$WIP_LOCK" "hermes:$AGENT_ID" --ttl 3600 >/dev/null 2>&1; then
-  printf '[heartbeat] WIP lease held by Momo — skipping full reconcile pass this tick\n'
+  printf '[heartbeat] board-driver lease held by Momo — skipping full reconcile pass this tick\n'
   exit 0
 fi
 trap 'python3 "$ROLE_DIR/.scripts/momo-wip-lock.py" release "$WIP_LOCK" "hermes:$AGENT_ID" >/dev/null 2>&1 || true' EXIT

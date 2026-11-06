@@ -4,18 +4,17 @@ Status: sentinel engine protocol (provider-agnostic)
 
 ## Invariant
 
-If a ready ticket exists, an implementation worker must be actively moving it,
-or the sentinel records why none can. Prefer one live thread over a quiet
-backlog. WIP limit: `.project.json` `automation.implementation.wip_limit` active
-worker tickets, default one.
+Every ready ticket gets an implementation worker, in parallel, or the sentinel
+records why it cannot. There is no default cap on tickets in progress; a healthy
+worker on one ticket never stops another ready ticket from being dispatched. An
+explicit positive `.project.json` `automation.implementation.wip_limit` is an
+opt-in cap the sentinel honours; absent means unlimited.
 
-A project that raises the limit above one must also carry
-`agents/hermes/<role>/IMPLEMENTATION-LANES.md`, saying how a lane is claimed
-(one owner and an exact file scope per ticket, and how the claim is refreshed
-and released). The sentinel follows it on every pass and never duplicates
-another owner's work. The short board-driver lease (`momo-wip-lock.py`) is
-separate from those implementation claims: release it before waiting on a
-worker.
+One worker, one owner per ticket: never double-dispatch a ticket or duplicate
+another owner's work. Tickets whose file scopes clearly collide are sequenced
+with a `--blocks` relation instead of run blind in parallel. The short
+board-driver lease (`momo-wip-lock.py`) is not a WIP limit; it only serializes
+board selection/transition passes. Release it before waiting on a worker.
 
 The sentinel owns the watch loop. Workers (codex, opencode, copilot, …) own
 implementation. The sentinel clears review-lane work via the autonomous
@@ -48,16 +47,16 @@ current and machine-readable: `source`, `agent_id`, `repo`, `ticket_provider`,
 
 When sources disagree, record a truth-check note and keep the issue open.
 
-## Ticket selection (when an implementation lane is free)
+## Ticket selection (every pass, for each ready ticket)
 
 1. A blocked/review ticket needing only agent-doable evidence repair.
 2. An unblocked issue in the current milestone.
 3. A small, high-priority backlog issue when the milestone has no ready ticket.
 
-Claim the chosen issue (per `IMPLEMENTATION-LANES.md` when the project has
-one), move it to `started` (`tp transition <id> started`) and create/refresh
-its evidence file before spawning exactly one worker for it. Repeat for the
-remaining capacity only when the next ticket's file scope is independent.
+Claim each chosen issue (one owner per ticket), move it to `started`
+(`tp transition <id> started`) and create/refresh its evidence file before
+spawning one worker for it. Repeat for every other ready ticket; sequence a
+ticket whose file scope clearly collides with a running one via `--blocks`.
 
 ## Stop conditions
 
@@ -66,7 +65,7 @@ candidate is blocked by external evidence/credentials/product decisions (a
 ticket blocked **only** on human review is NOT a stop condition — run it through
 the independent adversarial review and act on the verdict immediately, no
 waiting; and a dependent blocked **only** on a review-accepted feature is NOT
-blocked); every implementation lane is already held by a healthy worker; or the next action needs
+blocked); every ready ticket already has a healthy worker (or an explicit `wip_limit` is reached); or the next action needs
 destructive git ops / production credentials / a paid action.
 
 The loop never ends a pass with work parked waiting on the operator.

@@ -5,6 +5,14 @@
 if [[ "${__PJANGLER_FLEET_ENV_LIBRARY_LOADED:-0}" == "1" ]]; then
   return 0
 fi
+# namerefs, associative arrays and `mapfile -d ''` below need bash >= 4.4.
+# Under macOS /bin/bash 3.2 they fail mid-load with misleading errors, so stop
+# here; entrypoints source lib/bash-guard.sh first, which re-execs them.
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
+  builtin printf 'fleet environment loader requires bash >= 4.4 (this is %s at %s); install a current bash (brew install bash) and put it ahead of /bin on PATH\n' \
+    "${BASH_VERSION:-unknown}" "${BASH:-?}" >&2
+  return 1
+fi
 __PJANGLER_FLEET_ENV_LIBRARY_LOADED=1
 
 # fleet.env is shared configuration, not authority to inject code into Python,

@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Opt-in, profile-local Slack Socket Mode provisioning.
 #
+# bash >= 4.4 before anything else: lib/bash-guard.sh re-execs this step under
+# a modern bash (macOS /bin/bash is 3.2) and must run BEFORE the invocation
+# credentials below are captured and unset, or the re-exec would lose them.
+# Builtins only: no child process may see the still-exported credentials.
+case "$0" in */*) HAT_GUARD="${0%/*}/lib/bash-guard.sh" ;; *) HAT_GUARD="lib/bash-guard.sh" ;; esac
+if [[ -f "$HAT_GUARD" && ! -L "$HAT_GUARD" ]]; then
+  # shellcheck source=lib/bash-guard.sh
+  builtin source "$HAT_GUARD"
+fi
+unset HAT_GUARD
+#
 # Slack credentials are invocation-only inputs.  Capture them before _lib.sh
 # sources fleet.env so an accidentally shared fleet token can never provision a
 # profile.  The non-secret allowed-user policy may still come from fleet.env.
@@ -334,11 +345,19 @@ credential_lines = sys.stdin.read().splitlines()
 if len(credential_lines) != 2 or not all(credential_lines):
     raise SystemExit("Slack ownership scan received an invalid credential pair")
 bot_token, app_token = credential_lines
-for metadata_path in (pathlib.Path("/proc/self/cmdline"), pathlib.Path("/proc/self/environ")):
-    if metadata_path.is_file():
-        metadata = metadata_path.read_bytes()
-        if any(secret.encode() in metadata for secret in (bot_token, app_token)):
-            raise SystemExit("Slack ownership scan detected credential exposure in process metadata")
+def process_metadata():
+    # Linux: the kernel's view of this process's argv and initial environment.
+    # Without /proc (macOS) the interpreter's own copies of the same two.
+    procfs = (pathlib.Path("/proc/self/cmdline"), pathlib.Path("/proc/self/environ"))
+    if any(path.is_file() for path in procfs):
+        return [path.read_bytes() for path in procfs if path.is_file()]
+    return [
+        b"\0".join(os.fsencode(arg) for arg in getattr(sys, "orig_argv", sys.argv)),
+        b"\0".join(key + b"=" + value for key, value in os.environb.items()),
+    ]
+for metadata in process_metadata():
+    if any(secret.encode() in metadata for secret in (bot_token, app_token)):
+        raise SystemExit("Slack ownership scan detected credential exposure in process metadata")
 target = pathlib.Path(target_path).resolve(strict=False)
 
 def env_values(path):

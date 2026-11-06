@@ -147,7 +147,9 @@ if staged_mode:
     item = f"{item}-v-{uuid.uuid4().hex[:16]}"
     document = {
         "title": item,
-        "category": "PASSWORD",
+        # These items carry named API credentials, not a primary password.
+        # 1Password rejects PASSWORD items with only custom concealed fields.
+        "category": "API_CREDENTIAL",
         "fields": [
             {
                 "id": field,

@@ -244,9 +244,16 @@ class RegistryLock:
         )
 
     def _inherited_matching_fd(self, opened: os.stat_result) -> int | None:
-        try:
-            names = os.listdir("/proc/self/fd")
-        except OSError:
+        # /proc/self/fd on Linux, /dev/fd on Darwin; else probe the low range
+        # (bash allocates named descriptors from 10 upward).
+        names: list[str] | None = None
+        for listing in ("/proc/self/fd", "/dev/fd"):
+            try:
+                names = os.listdir(listing)
+                break
+            except OSError:
+                continue
+        if names is None:
             names = [str(number) for number in range(3, 256)]
         for raw in names:
             if not raw.isdigit():
@@ -429,27 +436,45 @@ def state_same_inode_and_bytes(current: FileState, expected: FileState) -> bool:
 AT_FDCWD = -100
 RENAME_NOREPLACE = 1
 RENAME_EXCHANGE = 2
+# Darwin <sys/stdio.h>: renamex_np(from, to, flags) carries the same two
+# operations (APFS): RENAME_SWAP is RENAME_EXCHANGE, RENAME_EXCL RENAME_NOREPLACE.
+DARWIN_RENAME_SWAP = 0x00000002
+DARWIN_RENAME_EXCL = 0x00000004
+_DARWIN_FLAGS = {RENAME_EXCHANGE: DARWIN_RENAME_SWAP, RENAME_NOREPLACE: DARWIN_RENAME_EXCL}
 _LIBC = ctypes.CDLL(None, use_errno=True)
 _RENAMEAT2 = getattr(_LIBC, "renameat2", None)
 if _RENAMEAT2 is not None:
     _RENAMEAT2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
     _RENAMEAT2.restype = ctypes.c_int
+_RENAMEX_NP = getattr(_LIBC, "renamex_np", None) if sys.platform == "darwin" else None
+if _RENAMEX_NP is not None:
+    _RENAMEX_NP.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+    _RENAMEX_NP.restype = ctypes.c_int
 
 
 def renameat2(source: pathlib.Path, target: pathlib.Path, flags: int) -> None:
-    """Linux atomic rename primitive used as the file-level CAS operation."""
+    """Atomic rename primitive used as the file-level CAS operation.
 
-    if _RENAMEAT2 is None:
+    Linux renameat2(2); on Darwin renamex_np(2) with the equivalent flag. A
+    platform with neither refuses the transaction before anything moves.
+    """
+
+    if _RENAMEX_NP is not None:
+        if flags not in _DARWIN_FLAGS:
+            raise TransactionRecoveryError(f"unsupported atomic rename flags: {flags}")
+        result = _RENAMEX_NP(os.fsencode(source), os.fsencode(target), _DARWIN_FLAGS[flags])
+    elif _RENAMEAT2 is None:
         raise TransactionRecoveryError(
-            "renameat2 is required for crash-safe channel compare-and-swap"
+            "renameat2 (Linux) or renamex_np (Darwin) is required for crash-safe channel compare-and-swap"
         )
-    result = _RENAMEAT2(
-        AT_FDCWD,
-        os.fsencode(source),
-        AT_FDCWD,
-        os.fsencode(target),
-        flags,
-    )
+    else:
+        result = _RENAMEAT2(
+            AT_FDCWD,
+            os.fsencode(source),
+            AT_FDCWD,
+            os.fsencode(target),
+            flags,
+        )
     if result != 0:
         error = ctypes.get_errno()
         raise OSError(error, os.strerror(error), str(source), str(target))
@@ -1793,55 +1818,37 @@ def load_snapshot_mapping(
     return data
 
 
-def plain_merge(base: dict, override: dict) -> dict:
-    result = copy.deepcopy(base)
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = plain_merge(result[key], value)
-        elif key in result and isinstance(result[key], dict) and value is None:
-            continue
-        else:
-            result[key] = copy.deepcopy(value)
-    return result
+_CANONICAL_RENDERER = None
 
 
-def apply_list_patches(result: dict, directive: object) -> None:
-    if directive is None:
-        return
-    if not isinstance(directive, dict) or not isinstance(directive.get("list_patches", {}), dict):
-        fail(f"{LIST_PATCH_KEY}.list_patches must be a mapping")
-    for dotted, rule in directive.get("list_patches", {}).items():
-        if not isinstance(dotted, str) or not dotted or not isinstance(rule, dict):
-            fail("invalid list patch")
-        additions = rule.get("add", []) or []
-        removals = rule.get("remove", []) or []
-        if not isinstance(additions, list) or not isinstance(removals, list) or not all(
-            isinstance(item, str) for item in [*additions, *removals]
-        ):
-            fail(f"list patch for {dotted} must contain string lists")
-        cursor = result
-        parts = dotted.split(".")
-        for part in parts[:-1]:
-            child = cursor.setdefault(part, {})
-            if not isinstance(child, dict):
-                fail(f"list patch parent for {dotted} is not a mapping")
-            cursor = child
-        current = cursor.get(parts[-1], []) or []
-        if not isinstance(current, list):
-            fail(f"list patch target {dotted} is not a list")
-        removed = set(removals)
-        merged = [item for item in current if item not in removed]
-        for item in additions:
-            if item not in merged:
-                merged.append(item)
-        cursor[parts[-1]] = merged
+def canonical_renderer(profile: pathlib.Path):
+    """THE renderer (scripts/hermes-profile-config.py), bound to this profile's fleet home.
+
+    The generated config is ``expected_config(base, delta, profile)`` -- the Hermes merge plus every
+    renderer pin. A private merge here once rewrote config.yaml without the ``terminal.cwd`` pin.
+    """
+    global _CANONICAL_RENDERER
+    if _CANONICAL_RENDERER is None:
+        source = pathlib.Path(__file__).parent / "lib" / "profile-renderer.py"
+        if source.is_symlink() or not source.is_file():
+            fail(f"trusted profile renderer locator is unavailable: {source}")
+        spec = importlib.util.spec_from_file_location("pjangler_profile_renderer_locator", source)
+        if spec is None or spec.loader is None:
+            fail(f"cannot load profile renderer locator: {source}")
+        locator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(locator)
+        try:
+            _CANONICAL_RENDERER = locator.load(profile.parent.parent)
+        except RuntimeError as exc:
+            fail(str(exc))
+    return _CANONICAL_RENDERER
 
 
-def merge(base: dict, delta: dict) -> dict:
-    ordinary = {key: value for key, value in delta.items() if key != LIST_PATCH_KEY}
-    result = plain_merge(base, ordinary)
-    apply_list_patches(result, delta.get(LIST_PATCH_KEY))
-    return result
+def merge(base: dict, delta: dict, profile: pathlib.Path, registry: pathlib.Path) -> dict:
+    try:
+        return canonical_renderer(profile).expected_config(base, delta, profile.name, registry=registry)
+    except ValueError as exc:
+        fail(str(exc))
 
 
 def delta_comments(original: bytes) -> list[str]:
@@ -1864,12 +1871,15 @@ def render_delta(delta: dict, original: bytes) -> bytes:
     ).encode("utf-8")
 
 
-def render_generated(base: dict, delta: dict) -> bytes:
+def render_generated(
+    base: dict, delta: dict, profile: pathlib.Path, registry: pathlib.Path
+) -> bytes:
     header = (
         "# GENERATED FILE -- DO NOT EDIT.\n"
         "# source: fleet config.yaml + profile config.delta.yaml\n"
     )
-    return (header + yaml.safe_dump(merge(base, delta), sort_keys=False)).encode("utf-8")
+    rendered = merge(base, delta, profile, registry)
+    return (header + yaml.safe_dump(rendered, sort_keys=False)).encode("utf-8")
 
 
 def role_channel_block(text: str, channel: str) -> re.Match[str]:
@@ -2127,7 +2137,9 @@ def prepare_unconfigured(
         fail(f"platforms.{args.channel} delta must be a mapping")
     platform["enabled"] = False
     delta_content = render_delta(delta, originals["delta"].content)
-    generated_content = render_generated(base, delta)
+    generated_content = render_generated(
+        base, delta, pathlib.Path(args.profile), pathlib.Path(args.registry)
+    )
     role_content = update_role_status(
         originals["role"].content, args.channel, "deferred"
     )
@@ -2274,7 +2286,7 @@ def commit_locked(args: argparse.Namespace) -> None:
     platform["enabled"] = False
 
     disabled_delta = render_delta(delta, originals["delta"].content)
-    disabled_generated = render_generated(base, delta)
+    disabled_generated = render_generated(base, delta, profile, registry_path)
     role_content = update_role(originals["role"].content, channel, metadata)
     env_content = update_runtime_env(originals["runtime_env"].content, channel, allowed_value)
     registry_content = update_registry(
@@ -2287,7 +2299,7 @@ def commit_locked(args: argparse.Namespace) -> None:
     )
     platform["enabled"] = True
     enabled_delta = render_delta(delta, originals["delta"].content)
-    enabled_generated = render_generated(base, delta)
+    enabled_generated = render_generated(base, delta, profile, registry_path)
     run_transaction(
         transaction,
         originals,

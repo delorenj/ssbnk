@@ -33,11 +33,11 @@ ROLE_DIR_REL="${ROLE_DIR#"$REPO_ROOT"/}"
 
 # Serialize the complete read / provider check-or-create / atomic write
 # transaction per project.  The lock lives outside the checkout so a normal
-# provision cannot leave repository dirt behind.
-command -v flock >/dev/null 2>&1 \
-  || die "flock is required for safe ticket-provider binding"
-PROJECT_LOCK_KEY="$(printf '%s' "$PROJECT_JSON" | sha256sum)"
-PROJECT_LOCK_KEY="${PROJECT_LOCK_KEY%% *}"
+# provision cannot leave repository dirt behind. fd_lock is flock(1), or the
+# same flock(2) through lib/fd-lock.py on hosts without it (macOS).
+fd_lock_uses_flock || fd_lock_helper >/dev/null
+PROJECT_LOCK_KEY="$(printf '%s' "$PROJECT_JSON" | sha256_hex)" \
+  || die "could not derive the ticket-provider lock key"
 PROJECT_LOCK_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/pjangler-ticket-provider"
 mkdir -p "$PROJECT_LOCK_DIR"
 PROJECT_LOCK_FILE="$PROJECT_LOCK_DIR/$PROJECT_LOCK_KEY.lock"
@@ -45,10 +45,10 @@ PROJECT_LOCK_FILE="$PROJECT_LOCK_DIR/$PROJECT_LOCK_KEY.lock"
   || die "refusing ticket-provider lock symlink: $PROJECT_LOCK_FILE"
 exec {PROJECT_LOCK_FD}>"$PROJECT_LOCK_FILE"
 chmod 600 "$PROJECT_LOCK_FILE"
-flock -w "${PROJECT_LOCK_TIMEOUT_SECONDS:-30}" "$PROJECT_LOCK_FD" \
+fd_lock "$PROJECT_LOCK_FD" "${PROJECT_LOCK_TIMEOUT_SECONDS:-30}" \
   || die "timed out waiting for ticket-provider lock: $PROJECT_JSON"
 project_lock_release() {
-  flock -u "$PROJECT_LOCK_FD" 2>/dev/null || true
+  fd_unlock "$PROJECT_LOCK_FD" 2>/dev/null || true
   exec {PROJECT_LOCK_FD}>&-
 }
 trap project_lock_release EXIT
