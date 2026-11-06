@@ -85,7 +85,12 @@ comment / transition per the lifecycle) before the general reconcile below.
    local evidence under `_bmad-output/implementation-artifacts/issue-evidence/`,
    and live worker state (zellij sessions, worktrees, git).
 3. Monitor every `started` ticket whose worker is healthy and record state.
-4. For EVERY ready unblocked issue with no active worker, delegate one worker
+4. Scope and blockers come from the adapter: an issue is yours only if `labels`
+   carries your `board_scope` label, and it is unblocked only if `tp get_issue`
+   shows no `relations.blocked_by` entry whose `state_type` is still open (not
+   `completed`/`cancelled`). A `relations_error` means unknown, not unblocked:
+   say so in the evidence and do not dispatch over it.
+   For EVERY ready unblocked issue with no active worker, delegate one worker
    per ticket (see the orchestration doc), in parallel; move each issue to
    `started` and create/refresh its evidence file. A running worker on another
    ticket is not a reason to wait. Do not self-accept review here.

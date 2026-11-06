@@ -486,10 +486,18 @@ except Exception: print("")')"
     resolve_state_target "$TARGET"
     ;;
 
+  list_labels)
+    [ -n "$PROJ" ] || die "project not set"
+    api_all "projects/$PROJ/labels/" | python3 -c 'import json,sys
+rows=json.load(sys.stdin)
+print(json.dumps([{"id":x["id"],"name":x["name"]} for x in rows if isinstance(x,dict) and x.get("id") and x.get("name")]))'
+    ;;
+
   list_issues)
     [ -n "$PROJ" ] || die "project not set"
     # Plane v1 returns issue.state as a bare UUID, so join against the states map.
     STATES="$(api_all "projects/$PROJ/states/")"
+    LABELS="$(api_all "projects/$PROJ/labels/")"
     ISSUES="$(api_all "projects/$PROJ/issues/")"
     MILESTONE="$(api_all "projects/$PROJ/cycles/" | current_cycle)"
     MILESTONE_ID="$(printf '%s' "$MILESTONE" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id", ""))')"
@@ -497,22 +505,47 @@ except Exception: print("")')"
     if [ -n "$MILESTONE_ID" ]; then
       MILESTONE_ISSUES="$(api_all "projects/$PROJ/cycles/$MILESTONE_ID/cycle-issues/")"
     fi
-    printf '%s\0%s\0%s\0%s' "$STATES" "$ISSUES" "$MILESTONE" "$MILESTONE_ISSUES" \
+    printf '%s\0%s\0%s\0%s\0%s' "$STATES" "$LABELS" "$ISSUES" "$MILESTONE" "$MILESTONE_ISSUES" \
       | BASE="$BASE" WS="$WS" PROJ="$PROJ" python3 -c 'import sys,json,os
-parts=sys.stdin.buffer.read().split(b"\0",3)
+parts=sys.stdin.buffer.read().split(b"\0",4)
 srows=json.loads(parts[0] or "{}"); srows=srows if isinstance(srows,list) else srows.get("results", []) if isinstance(srows,dict) else []
 smap={s.get("id"):(s.get("name",""),s.get("group","")) for s in srows}
-d=json.loads(parts[1] or "{}"); rows=d if isinstance(d,list) else d.get("results", []) if isinstance(d,dict) else []
-milestone=json.loads(parts[2] or "{}"); milestone_id=str(milestone.get("id") or ""); milestone_name=str(milestone.get("name") or "")
-md=json.loads(parts[3] or "{}"); mrows=md if isinstance(md,list) else md.get("results", []) if isinstance(md,dict) else []
+label_rows=json.loads(parts[1] or "[]")
+label_rows=label_rows if isinstance(label_rows,list) else label_rows.get("results", [])
+label_map={str(x["id"]):str(x["name"]) for x in label_rows if isinstance(x,dict) and x.get("id") and x.get("name")}
+label_names=list(label_map.values())
+def labels(issue):
+    raw=issue.get("labels") or []
+    if not isinstance(raw,list): raise SystemExit("plane: issue labels were not a list")
+    names=[]
+    for item in raw:
+        identifier=str(item.get("id") or "") if isinstance(item,dict) else str(item)
+        supplied=item.get("name") if isinstance(item,dict) else None
+        if identifier:
+            name=label_map.get(identifier)
+            if not name: raise SystemExit(f"plane: issue label {identifier!r} could not be resolved on project")
+            if supplied is not None and supplied != name: raise SystemExit(f"plane: issue label {identifier!r} name disagreed with project catalog")
+        else:
+            name=supplied
+            if not isinstance(name,str) or label_names.count(name) != 1:
+                raise SystemExit(f"plane: issue label {identifier!r} could not be resolved uniquely on project")
+        if name not in names: names.append(name)
+    return names
+def relations(issue):
+    return {k:issue[k] for k in ("parent", "parent_id", "relations", "issue_relations", "blocked_by", "blocking", "depends_on", "dependencies") if k in issue}
+d=json.loads(parts[2] or "{}"); rows=d if isinstance(d,list) else d.get("results", []) if isinstance(d,dict) else []
+milestone=json.loads(parts[3] or "{}"); milestone_id=str(milestone.get("id") or ""); milestone_name=str(milestone.get("name") or "")
+md=json.loads(parts[4] or "{}"); mrows=md if isinstance(md,list) else md.get("results", []) if isinstance(md,dict) else []
 member_ids={str(issue.get("id") or "") for issue in mrows}
 base,ws,proj=os.environ["BASE"],os.environ["WS"],os.environ["PROJ"]
 out=[]
 for n in rows:
     iid=n.get("id","")
-    name,group=smap.get(n.get("state",""),("",""))
+    state=n.get("state",""); state=state.get("id") if isinstance(state,dict) else state
+    name,group=smap.get(state,("",""))
     out.append({"id":iid,"key":n.get("sequence_id",iid),
                 "title":n.get("name",""),"state":name,"state_type":group,
+                "labels":labels(n), **relations(n),
                 "updated_at":n.get("updated_at",""),"assignee":"",
                 "active_milestone_id":milestone_id,
                 "active_milestone_name":milestone_name,
@@ -524,18 +557,77 @@ print(json.dumps(out))'
   get_issue)
     ID="${1:?usage: get_issue <id>}"
     STATES="$(api_all "projects/$PROJ/states/")"
+    LABELS="$(api_all "projects/$PROJ/labels/")"
     ISSUE="$(api GET "projects/$PROJ/issues/$ID/")"
     COMM="$(api_all "projects/$PROJ/issues/$ID/comments/" 2>/dev/null || echo '[]')"
     ATTACH="$(api_all "projects/$PROJ/issues/$ID/issue-attachments/" 2>/dev/null || echo '[]')"
-    printf '%s\n%s\n%s\n%s\n' "$STATES" "$ISSUE" "$COMM" "$ATTACH" | python3 -c 'import sys,json,re
-parts=sys.stdin.read().split("\n",3)
+    # Relations (blocked_by, blocking, relates_to, duplicate, start_*/finish_*) live on
+    # their own endpoint, never on the issue row. Plane answers from both ends of a
+    # row, so one read sees every relation the item takes part in (px link list reads
+    # the same). Each related item is hydrated to key/title/state so a PM can tell an
+    # open blocker from a finished one. A failed read is reported, never hidden as "none".
+    REL_ERR=""
+    REL="$(api GET "projects/$PROJ/work-items/$ID/relations/" 2>/dev/null)" || { REL='{}'; REL_ERR="relations endpoint could not be read"; }
+    RELATED=""
+    for pair in $(printf '%s' "$REL" | PROJ="$PROJ" python3 -c 'import sys,json,os
+d=json.loads(sys.stdin.read() or "{}")
+seen=set()
+for rows in (d.values() if isinstance(d,dict) else []):
+    for r in (rows if isinstance(rows,list) else []):
+        rid=str((r or {}).get("issue_id") or (r or {}).get("id") or "")
+        pid=str((r or {}).get("project_id") or (r or {}).get("project") or os.environ["PROJ"])
+        if rid and (pid,rid) not in seen:
+            seen.add((pid,rid)); print(pid+":"+rid)' 2>/dev/null); do
+      rp="${pair%%:*}"; ri="${pair#*:}"
+      row="$(api GET "projects/$rp/issues/$ri/" 2>/dev/null)" || row="{\"id\":\"$ri\",\"unreadable\":true}"
+      RELATED="$RELATED$(printf '%s' "$row" | tr -d '\n')
+"
+    done
+    printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s' "$STATES" "$LABELS" "$ISSUE" "$COMM" "$ATTACH" "$REL" "$RELATED" "$REL_ERR" | python3 -c 'import sys,json,re
+parts=sys.stdin.buffer.read().split(b"\0",7)
 srows=json.loads(parts[0] or "{}"); srows=srows if isinstance(srows,list) else srows.get("results", []) if isinstance(srows,dict) else []
 smap={s.get("id"):(s.get("name",""),s.get("group","")) for s in srows}
-i=json.loads(parts[1] or "{}"); c=json.loads(parts[2] or "[]"); a=json.loads(parts[3] or "[]")
+label_rows=json.loads(parts[1] or "[]")
+label_rows=label_rows if isinstance(label_rows,list) else label_rows.get("results", [])
+label_map={str(x["id"]):str(x["name"]) for x in label_rows if isinstance(x,dict) and x.get("id") and x.get("name")}
+label_names=list(label_map.values())
+i=json.loads(parts[2] or "{}"); c=json.loads(parts[3] or "[]"); a=json.loads(parts[4] or "[]")
+raw=i.get("labels") or []
+if not isinstance(raw,list): raise SystemExit("plane: issue labels were not a list")
+labels=[]
+for item in raw:
+    identifier=str(item.get("id") or "") if isinstance(item,dict) else str(item)
+    supplied=item.get("name") if isinstance(item,dict) else None
+    if identifier:
+        name=label_map.get(identifier)
+        if not name: raise SystemExit(f"plane: issue label {identifier!r} could not be resolved on project")
+        if supplied is not None and supplied != name: raise SystemExit(f"plane: issue label {identifier!r} name disagreed with project catalog")
+    else:
+        name=supplied
+        if not isinstance(name,str) or label_names.count(name) != 1:
+            raise SystemExit(f"plane: issue label {identifier!r} could not be resolved uniquely on project")
+    if name not in labels: labels.append(name)
+relations={k:i[k] for k in ("parent", "parent_id", "issue_relations", "blocked_by", "blocking", "depends_on", "dependencies") if k in i}
+rel=json.loads(parts[5] or "{}"); rel=rel if isinstance(rel,dict) else {}
+related={}
+for line in (parts[6] or b"").decode().splitlines():
+    if not line.strip(): continue
+    r=json.loads(line); related[str(r.get("id",""))]=r
+def hydrate(r):
+    rid=str((r or {}).get("issue_id") or (r or {}).get("id") or ""); x=related.get(rid,{})
+    st=x.get("state",""); st=st.get("id") if isinstance(st,dict) else st
+    sname,sgroup=smap.get(st,("",""))
+    out={"id":rid,"key":x.get("sequence_id",""),"title":x.get("name",""),"state":sname,"state_type":sgroup,
+         "project_id":str((r or {}).get("project_id") or x.get("project") or "")}
+    if x.get("unreadable"): out["unreadable"]=True
+    return out
+relations["relations"]={t:[hydrate(r) for r in rows_] for t,rows_ in rel.items() if isinstance(rows_,list) and rows_}
+if parts[7]: relations["relations_error"]=parts[7].decode()
 rows=c if isinstance(c,list) else c.get("results", []) if isinstance(c,dict) else []
 arows=a if isinstance(a,list) else a.get("results", []) if isinstance(a,dict) else []
 def strip(h): return re.sub(r"<[^>]+>","",h or "").strip()
-name,group=smap.get(i.get("state",""),("",""))
+state=i.get("state",""); state=state.get("id") if isinstance(state,dict) else state
+name,group=smap.get(state,("",""))
 desc=strip(i.get("description_html",""))
 cs=[{"id":x.get("id",""),"body":strip(x.get("comment_html","")),"author":""} for x in rows]
 ats=[]
@@ -549,7 +641,8 @@ for x in arows:
                 "is_uploaded":x.get("is_uploaded",False)})
 print(json.dumps({"id":i.get("id",""),"key":i.get("sequence_id",""),"title":i.get("name",""),
                   "description":desc,"acceptance":desc,
-                  "state":name,"state_type":group,"comments":cs,"attachments":ats}))'
+                  "state":name,"state_type":group,"labels":labels,**relations,
+                  "comments":cs,"attachments":ats}))'
     ;;
 
   comment)

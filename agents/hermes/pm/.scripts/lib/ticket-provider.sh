@@ -11,9 +11,15 @@
 #   active_milestone              -> JSON {id, name, state}
 #   list_issues                   -> JSON [ {id,key,title,state,state_type,
 #                                            updated_at,assignee,url,...}, ... ]
+#                                    (plane also: labels:[name...] resolved through
+#                                    the project catalog, and parent when present)
 #   get_issue <issue-ref>         -> JSON {id,key,title,description,acceptance,
 #                                          state,state_type,comments:[...],
 #                                          attachments:[...]}
+#                                    (plane also: labels, parent, and
+#                                    relations:{blocked_by|blocking|relates_to|...:
+#                                    [{id,key,title,state,state_type}]}; a failed
+#                                    relations read sets relations_error)
 #   resolve_state <normalized>    -> JSON {id,state,state_type,normalized}
 #                                    Read-only validation of a configured
 #                                    transition target; never mutates an issue.
