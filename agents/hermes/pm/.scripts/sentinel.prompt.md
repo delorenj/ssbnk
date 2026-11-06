@@ -36,6 +36,37 @@ tp create_issue "<title>" "<desc>"    # file a NEW ticket; --if-absent to dedupe
 Reason in **normalized states**, not provider terms. This pass works identically
 on Linear, Plane, or Trello.
 
+## Board-driver lease — yours if the launcher holds it
+
+The board-driver lease (`.scripts/momo-wip-lock.py`, `runtime/wip-driver.lock`) is
+a short board-write serializer, **not** a WIP limit. It exists so you, the
+human-drivable Momo and any other driver never write the board in the same
+instant. One rule decides everything: **the lease is yours only under the exact
+owner string you were handed or acquired with; any other fresh owner means back
+off.**
+
+- **The launcher already holds it for you** when this prompt ends with a
+  "Board-driver lease for THIS pass" section. That section names your owner
+  (`hermes:ssbnk-pm:pass-...`). It is yours: check it with
+  `momo-wip-lock.py held <path> <owner>`, `refresh` it during a long pass,
+  `release` it before waiting on workers, and re-acquire it after an early release,
+  always with **that exact owner written out literally** (your terminal does not
+  see the launcher's environment). **Never acquire it under any other name**
+  (`hermes:ssbnk-pm`, a new stamp, a session id): your own lease would refuse
+  you, and backing off from your own lease dispatches nothing.
+- **No launcher** (a Bloodbank, Momo-crank or manual turn)? Pick ONE owner for this
+  turn, `hermes:ssbnk-pm:<turn tag>` (the invocation or session id, or a UTC
+  stamp), write it out literally and reuse that exact string for every
+  `acquire`/`held`/`refresh`/`release` in the turn, so your own re-acquire is
+  reentrant. Never regenerate it (no `$(date)` in the command). Use the default
+  ttl (300s) and `refresh` while you drive: a turn has no exit trap, so a long ttl
+  would block every other driver for that long if the turn is cut off.
+- **Back off** (no board writes, no dispatch; leave it for the next pass) when
+  the lease is held fresh by any owner that is not your exact string: `momo`, a
+  job (`claude:...`), another agent, or another pass or turn of your own desk
+  (`hermes:ssbnk-pm` with a different tag is a real sibling driver). Momo
+  must always be able to make you stand down.
+
 ## Pass
 
 **Trigger.** This pass runs both as a scheduled reconcile (`.scripts/heartbeat.sh`;
