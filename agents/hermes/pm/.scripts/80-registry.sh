@@ -26,6 +26,13 @@ fi
 
 PROJECT_PATH="$(project_repo_path)" || PROJECT_PATH=""
 PLANE_PROJECT_ID="$(cat "$ROLE_DIR/.scripts/.plane-project-id" 2>/dev/null || true)"
+BOARD_SCOPE="$(yaml_get board_scope)"
+case "$BOARD_SCOPE" in
+  ""|owner) ;;
+  \[*\]) ;;  # shared-board scoped mode: a list of repo:* labels (roles/pm.md); owner behaviour on its scope
+  advisory) PLANE_PROJECT_ID="" ;;
+  *) die "unsupported board_scope in role.yaml: $BOARD_SCOPE" ;;
+esac
 
 # A named agent declares WHO it is in role.yaml (`identity:`); the post is
 # agent_id/profile. Project that declaration, validated, into the registry so
@@ -39,7 +46,7 @@ ROLE_IDENTITY_JSON="$(python3 -I "$ROLE_IDENTITY_READER" "$ROLE_YAML" "$AGENT_ID
 
 log "[80] appending to fleet registry: $REGISTRY_FILE"
 
-python3 - "$REGISTRY_FILE" "$AGENT_ID" "$REPO" "$ROLE" "$DISPLAY_NAME" \
+BOARD_SCOPE="$BOARD_SCOPE" python3 - "$REGISTRY_FILE" "$AGENT_ID" "$REPO" "$ROLE" "$DISPLAY_NAME" \
   "$PROJECT_PATH" "$ROLE_DIR" "$PROFILE_NAME" \
   "$(yaml_get telegram.provisioning_status)" "$BOT_HANDLE" "$(yaml_get telegram.bot_id)" \
   "$(yaml_get slack.provisioning_status)" "$(yaml_get slack.team_id)" \
@@ -70,6 +77,11 @@ except ImportError:
  plane_ident, hermes_bin, hermes_repo, hermes_git_url,
  hermes_git_ref, hermes_git_sha, fleet_env,
  identity_json) = sys.argv[1:29]
+board_scope = os.environ.get("BOARD_SCOPE", "")
+if board_scope not in ("", "owner", "advisory") and not (board_scope.startswith("[") and board_scope.endswith("]")):
+    raise SystemExit(f"unsupported board_scope in role.yaml: {board_scope}")
+if board_scope == "advisory":
+    plane_id = ""  # claimants resolve ONLY by plane.project_id / plane.board_id
 p = pathlib.Path(path)
 if p.is_symlink():
     raise SystemExit(f"refusing to update registry symlink: {p}")
@@ -195,7 +207,7 @@ managed = {
     "gateway_scope": bloodbank_scope,
     "target_agent_id": bloodbank_target,
   },
-  "plane": {"workspace": plane_ws, "project_id": plane_id, "identifier": plane_ident},
+  "plane": {"workspace": plane_ws, "identifier": plane_ident},
   # No `runtime_repo`. An agent runtime is host-local and may hold secrets and
   # mutable state (PJAN-41); it is never a Git repository, never a submodule, and
   # never pushed anywhere. Durability belongs to Hindsight.
@@ -216,6 +228,10 @@ managed = {
   # (70-systemd.sh writes it, 99-summary.sh reads it).
   "provisioned_at": provisioned_at,
 }
+if board_scope == "advisory":
+    managed["board_scope"] = "advisory"
+else:
+    managed["plane"]["project_id"] = plane_id
 # A channel the operator PARKED with `flume channel offline` stays parked: a
 # re-provision from role.yaml never flips it back to verified. Only
 # `flume channel online` lifts the park.
@@ -253,6 +269,11 @@ def merge_managed(current, update):
     return result
 
 entry = merge_managed(existing, managed)
+if board_scope == "advisory":
+    entry["plane"].pop("project_id", None)
+    entry["plane"].pop("board_id", None)
+else:
+    entry.pop("board_scope", None)
 if not identity and isinstance(entry.get("identity"), str):
     # role.yaml is the identity SSOT. A name it no longer declares is a stale
     # projection; drop it together with the personal bank it implied, so the

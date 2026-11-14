@@ -59,13 +59,12 @@ BOARD="$(pj_cfg board_id)"; [ -n "$BOARD" ] || BOARD="$(tp_cfg board)"
 canonical_state_target() {
   case "$1" in
     needs_attention|waiting_reply) printf 'awaiting_decision\n' ;;
-    ready_for_e2e) printf 'e2e_testing\n' ;;
     *) printf '%s\n' "$1" ;;
   esac
 }
 
 # Normalized -> Trello list name (overridable via role.yaml state_map keys).
-# The extended targets exist only when role.yaml names their list.
+# awaiting_decision exists only when role.yaml names its list.
 list_name_for() {
   want="$(canonical_state_target "$1")"
   case "$want" in
@@ -75,7 +74,7 @@ list_name_for() {
     in_review) v="$(tp_cfg in_review)"; printf '%s' "${v:-Review}" ;;
     completed) v="$(tp_cfg completed)"; printf '%s' "${v:-Done}" ;;
     cancelled) v="$(tp_cfg cancelled)"; printf '%s' "${v:-Cancelled}" ;;
-    awaiting_decision|e2e_testing|ready_for_documentation|needs_re_evaluation)
+    awaiting_decision)
       v="$(tp_cfg "$want")"
       [ -n "$v" ] || die "ticket_provider.$want is required in role.yaml"
       printf '%s' "$v"

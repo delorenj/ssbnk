@@ -12,6 +12,11 @@
 # full pass executes the role's sentinel.prompt.md, which reasons about tickets
 # through the ticket-provider adapter (Linear | Plane | Trello) — never a
 # hardcoded backend. After the sentinel decision (skip OR full), it
+#
+# KREBS LIFECYCLE v2 (2026-11-14): this script and the pass it launches NEVER dispatch
+# implementation. `krebs tick` (Candybar, every 10 minutes) is the only dispatcher: it moves
+# triaged Todo tickets to In Progress, two slots per scope. The pass orders Todo, applies
+# verdicts (In Progress + lifecycle:review) and unblocks; see sentinel.prompt.md.
 set -euo pipefail
 
 ROLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # agents/hermes/<role>
@@ -54,8 +59,8 @@ load_fleet_environment "$FLEET_ENV" "$FLEET_ENV_PARSER"
 # the pass report and state file are its record). NOT `oneshot`: Hermes charges a
 # oneshot session's subagents against delegation.oneshot_max_children (default 2,
 # tools/delegate_tool.py _oneshot_spawn_budget), a hidden two-workers-per-pass cap
-# that contradicts "one worker per ready ticket, no WIP limit". On 2026-11-06 it
-# refused the third delegate_task of a forge PM pass and stalled the board.
+# the pass no longer delegates workers at all (Krebs dispatches), so the cap is moot, but
+# `tool` stays the right label for a machine-paced run.
 SESSION_SOURCE="${SENTINEL_SESSION_SOURCE:-tool}"
 case "$SESSION_SOURCE" in
   cli|tui|gui|acp|tool|oneshot) ;;
@@ -179,9 +184,8 @@ if status in {"blocked","stalled","error"}:
         or iso_epoch(state.get("last_runner_completed_at")) or iso_epoch(state.get("updated_at")))
     if last_blocked_run and (now - last_blocked_run) < blocked_full_run_cooldown:
         print("skip:blocker-cooldown"); raise SystemExit(0)
-# No "a worker is already running, skip" gate: a PM orchestrates many tickets in
-# parallel, so a healthy worker on one ticket must never stop a pass that would
-# dispatch a different ready ticket. The cooldown below is the only throttle.
+# No "a worker is already running, skip" gate: the pass writes the board (Todo order,
+# verdicts) regardless of live workers. The cooldown below is the only throttle.
 last_full_run = float(state.get("last_full_run_epoch") or 0)
 if last_full_run and (now - last_full_run) < full_run_cooldown: print("skip:cooldown")
 else: print("run:full")
@@ -272,10 +276,10 @@ prompt+="The launcher that started this pass already acquired the board-driver l
 prompt+="\`\`\`bash"$'\n'
 prompt+="$lease_cmd held    $WIP_LOCK $LEASE_OWNER   # 0 = still yours"$'\n'
 prompt+="$lease_cmd refresh $WIP_LOCK $LEASE_OWNER   # during a long board pass"$'\n'
-prompt+="$lease_cmd release $WIP_LOCK $LEASE_OWNER   # before waiting on workers"$'\n'
+prompt+="$lease_cmd release $WIP_LOCK $LEASE_OWNER   # when done writing"$'\n'
 prompt+="$lease_cmd acquire $WIP_LOCK $LEASE_OWNER --ttl $LEASE_TTL   # write the board again after releasing"$'\n'
 prompt+="\`\`\`"$'\n\n'
-prompt+="Releasing early is fine; when the workers finish and you need to write the board again (Review, Done, a hold), re-acquire with exactly \`$LEASE_OWNER\` as above. If that acquire answers HELD by any other owner (\`momo\`, another agent, or another pass or turn of your own desk under a different owner string), another driver is writing the board: do not write it, and leave the transition for the next pass. The launcher's own release at exit is a no-op once you have released."$'\n'
+prompt+="Releasing early is fine; you need to write the board again (a verdict, a Todo move, a hold), re-acquire with exactly \`$LEASE_OWNER\` as above. If that acquire answers HELD by any other owner (\`momo\`, another agent, or another pass or turn of your own desk under a different owner string), another driver is writing the board: do not write it, and leave the transition for the next pass. The launcher's own release at exit is a no-op once you have released."$'\n'
 set +e
 HERMES_PROFILE_NAME="$PROFILE_NAME" "$ROLE_LAUNCHER" chat -Q --source "$SESSION_SOURCE" --max-turns 90 -q "$prompt"
 status=$?

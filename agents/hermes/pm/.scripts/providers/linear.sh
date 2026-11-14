@@ -8,9 +8,8 @@
 #   project: "<Project name>"    optional; scopes milestone/issue queries
 #   state_map: { in_review: "In Review", completed: "Done",
 #                cancelled: "Canceled" }   optional overrides
-#   Optional extended targets, enabled per role by naming their state:
-#     awaiting_decision, e2e_testing, ready_for_documentation,
-#     needs_re_evaluation
+#   awaiting_decision: "<state>"  optional; enables that target (Linear has no
+#                                 lifecycle labels here, so it is a lane)
 #
 # Implements the contract in lib/ticket-provider.sh. All Linear access goes
 # through GraphQL so the same envelope works in unattended runs.
@@ -100,9 +99,6 @@ SM_STARTED="$(tp_cfg started)"
 SM_UNSTARTED="$(tp_cfg unstarted)"
 SM_BACKLOG="$(tp_cfg backlog)"
 SM_AWAITING_DECISION="$(tp_cfg awaiting_decision)"
-SM_E2E_TESTING="$(tp_cfg e2e_testing)"
-SM_READY_FOR_DOCUMENTATION="$(tp_cfg ready_for_documentation)"
-SM_NEEDS_RE_EVALUATION="$(tp_cfg needs_re_evaluation)"
 MAX_PAGES="$(validated_uint LINEAR_MAX_PAGES "${LINEAR_MAX_PAGES:-1000}" 1 1000)"
 
 # Operator aliases -> their canonical normalized target. Aliases never own a
@@ -110,14 +106,13 @@ MAX_PAGES="$(validated_uint LINEAR_MAX_PAGES "${LINEAR_MAX_PAGES:-1000}" 1 1000)
 canonical_state_target() {
   case "$1" in
     needs_attention|waiting_reply) printf 'awaiting_decision\n' ;;
-    ready_for_e2e) printf 'e2e_testing\n' ;;
     *) printf '%s\n' "$1" ;;
   esac
 }
 
 # Normalized state -> WANT_TYPE (Linear workflow type) and WANT_NAME (the
-# configured state name, empty = resolve by workflow type). The extended
-# targets exist only when role.yaml names their state.
+# configured state name, empty = resolve by workflow type). awaiting_decision
+# exists only when role.yaml names its state.
 linear_state_target() {
   case "$1" in
     completed)  WANT_TYPE=completed; WANT_NAME="$SM_DONE" ;;
@@ -126,14 +121,11 @@ linear_state_target() {
     started)    WANT_TYPE=started;   WANT_NAME="$SM_STARTED" ;;
     unstarted)  WANT_TYPE=unstarted; WANT_NAME="$SM_UNSTARTED" ;;
     backlog)    WANT_TYPE=backlog;   WANT_NAME="$SM_BACKLOG" ;;
-    awaiting_decision)       WANT_TYPE=started;   WANT_NAME="$SM_AWAITING_DECISION" ;;
-    e2e_testing)             WANT_TYPE=started;   WANT_NAME="$SM_E2E_TESTING" ;;
-    ready_for_documentation) WANT_TYPE=started;   WANT_NAME="$SM_READY_FOR_DOCUMENTATION" ;;
-    needs_re_evaluation)     WANT_TYPE=unstarted; WANT_NAME="$SM_NEEDS_RE_EVALUATION" ;;
+    awaiting_decision) WANT_TYPE=started; WANT_NAME="$SM_AWAITING_DECISION" ;;
     *) die "invalid normalized state: $1" ;;
   esac
   case "$1" in
-    awaiting_decision|e2e_testing|ready_for_documentation|needs_re_evaluation)
+    awaiting_decision)
       [ -n "$WANT_NAME" ] || die "ticket_provider.$1 is required in role.yaml"
       ;;
   esac

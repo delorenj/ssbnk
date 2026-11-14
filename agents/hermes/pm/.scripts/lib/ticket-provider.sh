@@ -23,18 +23,21 @@
 #   resolve_state <normalized>    -> JSON {id,state,state_type,normalized}
 #                                    Read-only validation of a configured
 #                                    transition target; never mutates an issue.
+#                                    (plane also: label,label_id for a target
+#                                    that adds a lifecycle label; a hold leaves
+#                                    the lane unchanged, so its id/state/
+#                                    state_type are empty)
 #   comment <issue-ref> <body>    -> prints comment id
 #   transition <issue-ref> <normalized>
 #                                 -> resolves id/human key, then moves issue; normalized in
 #                                     backlog|unstarted|started|in_review|completed|
-#                                     cancelled|awaiting_decision|e2e_testing|
-#                                     ready_for_documentation|needs_re_evaluation;
-#                                    needs_attention/waiting_reply and
-#                                    ready_for_e2e are aliases for
-#                                    awaiting_decision and e2e_testing.
-#                                    The four extended targets are enabled
-#                                    per role by naming their lane in
-#                                    role.yaml ticket_provider:.
+#                                     cancelled|awaiting_decision;
+#                                    needs_attention/waiting_reply are aliases
+#                                    for awaiting_decision. On Plane (Krebs
+#                                    lifecycle v2, five stock lanes) in_review
+#                                    is In Progress + lifecycle:review and
+#                                    awaiting_decision is a hold:
+#                                    +lifecycle:needs-input, lane unchanged.
 #   create_board <name> <id> <d>  -> JSON {board_id, board_url}
 #   describe_board <ws> <board_id>
 #                                 -> JSON {board_id, identifier, workspace,
@@ -224,14 +227,13 @@ tp() {
 }
 
 # Normalized states the engine reasons in. Adapters map these to provider terms.
-# The six neutral states every board has, then the four optional extended
-# targets. An extended target is enabled per role: it resolves only when that
-# role's role.yaml `ticket_provider:` block names its concrete lane, and the
-# provider refuses it with "ticket_provider.<state> is required" otherwise
-# (plane.sh defaults awaiting_decision to "Needs Attention"). The last three are
-# aliases: needs_attention/waiting_reply -> awaiting_decision, ready_for_e2e ->
-# e2e_testing.
-TP_STATES="backlog unstarted started in_review completed cancelled awaiting_decision e2e_testing ready_for_documentation needs_re_evaluation needs_attention waiting_reply ready_for_e2e"
+# The six neutral states every board has, then awaiting_decision and its two
+# aliases (needs_attention, waiting_reply). Plane boards follow Krebs lifecycle
+# v2 (krebs/spec/lifecycle.v2.yaml): five stock lanes, with review and holds
+# carried by labels, so plane.sh lands in_review in In Progress plus
+# lifecycle:review and awaiting_decision as +lifecycle:needs-input in place.
+# Linear and Trello still map both to a lane role.yaml names.
+TP_STATES="backlog unstarted started in_review completed cancelled awaiting_decision needs_attention waiting_reply"
 
 tp_is_valid_state() {
   case " $TP_STATES " in

@@ -1,5 +1,11 @@
 # Autonomous adversarial review (act, do not wait)
 
+> **Krebs lifecycle v2 (2026-11-14).** "Review lane" means In Progress + `lifecycle:review`;
+> `tp transition <id> started` and the review/decision lanes no longer exist. The verdict giver
+> is the Launch Director (the PM where there is none). Accepted: close (Done). Held or sent
+> back: Todo with `returned: <criterion>`; Krebs re-dispatches. This review is an optional
+> evidence check for a contested verdict, never a substitute for it, and never a dispatch.
+
 Status: sentinel engine protocol (provider-agnostic)
 
 ## Purpose

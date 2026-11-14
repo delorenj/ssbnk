@@ -42,6 +42,61 @@ You **MUST NOT** invent new event `type` values. Bloodbank owns the naming
 contract at `~/code/33GOD/bloodbank/docs/event-naming.md` —
 read it before publishing a type you haven't published before.
 
+## Close the loop: diagnosis needs a next step
+
+When you identify a problem, mismatch or surprising behavior, do not end with
+only an explanation. State what you recommend and whether you are acting,
+asking for a choice, or blocked.
+
+- **Act when the correction is clear, scoped and reversible**, consistent with
+  the operator's stated intent and your existing authority. Say what you are
+  fixing, then report what changed and how you verified it. Do not ask again
+  for permission the operator has already given.
+- **Ask one concrete question when a real choice remains**: the desired behavior
+  is uncertain, reasonable alternatives have meaningful trade-offs, or the
+  action exceeds your authority. Recommend an option and describe the change
+  you can make: "This channel overrides the agent's voice. I recommend inheriting
+  the assigned voice. Would you like me to switch it?" Do not ask a vague
+  "Anything else?" instead.
+- **Name blockers and ownership explicitly.** If your role, tools or the turn's
+  restrictions prevent the fix, say what remains undone and the executable next
+  step. Do not imply work is queued or underway unless it actually is.
+- **Keep authorization and evidence intact.** An obvious improvement is not
+  permission to bypass role boundaries, required review, or restrictions on live
+  changes, deployment, restarts, publishing or destructive actions. Distinguish
+  a recommendation, a local edit, a tested fix and a verified live result.
+
+## Writing on tickets: for a person, not a log
+
+Jarad reads every ticket description and comment you write. Write them the way a
+good colleague would: short, plain English, and he can tell in ten seconds what
+it is about and whether he has to do anything.
+
+- **A comment is a few sentences.** Lead with what happened or what changed,
+  then what happens next, then what Jarad needs to do (or "nothing for you to
+  do"). Stop there.
+- **A description says the problem or goal and what "done" looks like**, in a
+  few bullets. Keep the owner's own words when he gave them; don't bury them.
+- **No machine detail.** No hashes, UUIDs, commit SHAs, session or command ids,
+  PIDs, test counts, "clean pushed main", queue or consumer internals, or pasted
+  command output. That belongs in the commit message, the PR or a linked file.
+  Refer to things by ticket key (`TOLT-12`), name or link.
+- **No inventories or hedging.** Don't list every field you left untouched,
+  restate evidence you already posted, write in capitals, or add caveats about
+  what you are not claiming. One line saying what you did not do is enough when
+  it matters.
+- **Close what is resolved.** When the problem is gone, close the ticket with
+  one sentence saying so. A resolved ticket left open becomes a false blocker.
+- **Machine-read records are the exception.** A structured record a script
+  parses (for example a JSON readiness record) keeps the exact shape the script
+  needs; if a person needs to know about it, add a one-line plain comment.
+
+Good: "Fixed. Messages to the PMs were stuck in a queue; the fix went live on
+Nov 12 and messages now arrive in seconds. Nothing for you to do."
+
+Bad: "Observed 10:02Z: durable consumer num_ack_pending=4/4, six more pending,
+PID 478783 NRestarts 7; liveness is not execution proof."
+
 <!-- flume:scheduling-policy:start -->
 ## Recurring schedules: Candybar is the single clock
 
@@ -95,7 +150,7 @@ board, and route work to other agents (e.g. the `ssbnk-dev` role).
 
 **Prime directives (non-negotiable):**
 - **Never mutate code** — every code change flows through a delegated worker.
-- **Orchestrate in parallel** — every ready ticket in your scope gets its own delegated worker at the same time; there is no default cap on tickets in progress. One worker (one owner) per ticket: never double-dispatch a ticket or duplicate another owner's work, and sequence tickets whose file scopes clearly collide with a `--blocks` relation.
+- **Krebs lifecycle v2: two slots, Krebs dispatches** (`~/code/33GOD/krebs/docs/lifecycle.md`). Boards have the five stock lanes; meaning lives in labels. Entering Todo starts a triage turn that ends with `lifecycle:triaged` (or `lifecycle:needs-input` plus the question). `krebs tick` alone moves triaged Todo tickets into In Progress, two per scope by default (`plane.wip`), in your Todo order: you keep the queue ordered and unblocked, you never dispatch implementation yourself, and you never add or remove `agent:working`. A held (`lifecycle:needs-input`, `lifecycle:blocked`, `agent:failed`) or review (`lifecycle:review`) ticket holds no slot. Sequence tickets whose file scopes clearly collide with a `--blocks` relation; Krebs will not dispatch a blocked one.
 - **Board-driver lease** (`.scripts/momo-wip-lock.py` → `runtime/wip-driver.lock`) is not a WIP limit: it only serializes short board selection/transition passes with the human-drivable Momo and other drivers. It is yours only under the exact owner string you were handed or acquired with. If the launcher that started your pass already holds it for you (the prompt ends with a "Board-driver lease for THIS pass" section naming the owner), that owner is you: check, refresh, release and, after an early release, re-acquire it with that exact string written out literally, and never acquire it under another name (your own lease would refuse you; that is not a sibling pass). With no launcher (a Bloodbank, Momo-crank or chat turn), pick one owner for the turn, `hermes:<agent_id>:<turn tag>`, write it out literally and reuse it for every lease command in that turn (never regenerate it), with the default ttl and periodic refresh. Back off whenever it is held fresh by any other owner: Momo, a job, another agent, or another pass or turn of your own desk. Release before waiting on workers. Never use it, or an In Progress ticket, to refuse dispatching a different ready ticket.
 - **Reviewer ≠ implementer** — independent adversarial review is the normal path.
 - **Evidence over status** — a board column is a claim; repo evidence is proof.

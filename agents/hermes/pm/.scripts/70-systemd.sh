@@ -329,8 +329,9 @@ retire_agent_gateway_unit
 #                  is a Candybar manifest). Bloodbank carries the resulting
 #                  command events (krebs pull-subscribes
 #                  bloodbank.cmd.lifecycle.task.invoke); it is not the clock.
-#   persistence -> krebs attempts/leases, which park a stalled ticket in
-#                  "Needs Attention" instead of ticking forever
+#   persistence -> krebs (lifecycle v2): a failed turn is marked agent:failed,
+#                  a hold label that takes the ticket out of the flow (no
+#                  slot, no redispatch) instead of ticking forever
 #
 # Provisioning now REMOVES any heartbeat units it finds, so re-running this
 # script on an older install cleans up rather than resurrecting them.
