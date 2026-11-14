@@ -56,7 +56,7 @@ ticket_provider:
   backlog:   "Backlog"
   unstarted: "Todo"
   started:   "In Progress"
-  in_review: "E2E Testing & QA"
+  in_review: "In Progress"   # Krebs lifecycle v2: no review lane; review = In Progress + lifecycle:review
   completed: "Done"
   cancelled: "Cancelled"
 # Board-reconciliation knobs for the heartbeat sentinel pass.
