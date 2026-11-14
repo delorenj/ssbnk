@@ -16,7 +16,7 @@ read In Progress + `lifecycle:review`.
 
 One owner per ticket: never duplicate another owner's work. Tickets whose file scopes clearly
 collide are sequenced with a `--blocks` relation. The short board-driver lease
-(`momo-wip-lock.py`) is not a WIP limit; it only serializes board selection/transition passes.
+(`board-lease.py`) is not a WIP limit; it only serializes board selection/transition passes.
 
 When `heartbeat.sh` starts the pass it has already acquired that lease for the
 agent under a per-pass owner (`hermes:<agent_id>:pass-<utc>-<pid>`) and says so in
@@ -28,7 +28,7 @@ owner and never under another name, because acquire is reentrant only for the
 identical owner string and the agent's own lease would otherwise refuse it. An
 agent acquiring with no launcher picks one owner for its turn
 (`hermes:<agent_id>:<turn tag>`), writes it out literally and reuses it. Back off
-whenever the lease is held fresh by any other owner (`momo`, a job, another agent,
+whenever the lease is held fresh by any other owner (an interactive session, a job, another agent,
 or another pass of the same desk): owners are unique per pass precisely so two
 passes of one agent serialize instead of sharing the lease.
 

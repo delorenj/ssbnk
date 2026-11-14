@@ -231,8 +231,8 @@ state.update({"source":"hermes-continuous-ticket-sentinel","agent_id":agent_id,"
 tmp = path.with_suffix(path.suffix + ".tmp"); tmp.write_text(json.dumps(state, indent=2, sort_keys=True)+"\n"); tmp.replace(path)
 PYEOF
 
-# Board-driver lease (momo E2/S2.3; not a WIP limit): serializes short board
-# selection/transition passes. Don't full-drive if the human-drivable Momo (or any
+# Board-driver lease (not a WIP limit; interval-driver's board-lease.py): serializes short board
+# selection/transition passes. Don't full-drive if an interactive session (or any
 # other owner) holds it fresh — it's driving the same board right now. A crashed
 # holder's lease expires (ttl) so the board is never wedged. Release on any exit.
 #
@@ -247,7 +247,7 @@ PYEOF
 #
 # The owner is unique PER PASS (hermes:<agent_id>:pass-<utc>-<pid>), never the bare
 # hermes:<agent_id>: a gateway turn of this same agent (Telegram, a Bloodbank or
-# Momo-crank delegation) is a different driver and acquires under its own unique
+# crank delegation) is a different driver and acquires under its own unique
 # owner. A shared owner string would make both acquires "reentrant", two drivers
 # would write the board at once, and the first release would drop the lease out
 # from under the other. With one owner per pass they serialize like any two
@@ -260,7 +260,7 @@ PYEOF
 WIP_LOCK="$RUNTIME/wip-driver.lock"
 LEASE_OWNER="hermes:$AGENT_ID:pass-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 LEASE_TTL=3600
-LEASE_CLI="$ROLE_DIR/.scripts/momo-wip-lock.py"
+LEASE_CLI="$ROLE_DIR/.scripts/board-lease.py"
 if ! lease_out="$(python3 "$LEASE_CLI" acquire "$WIP_LOCK" "$LEASE_OWNER" --ttl "$LEASE_TTL" 2>&1)"; then
   printf '[heartbeat] board-driver lease not ours (%s) — skipping full reconcile pass this tick\n' "$lease_out"
   exit 0
@@ -279,7 +279,7 @@ prompt+="$lease_cmd refresh $WIP_LOCK $LEASE_OWNER   # during a long board pass"
 prompt+="$lease_cmd release $WIP_LOCK $LEASE_OWNER   # when done writing"$'\n'
 prompt+="$lease_cmd acquire $WIP_LOCK $LEASE_OWNER --ttl $LEASE_TTL   # write the board again after releasing"$'\n'
 prompt+="\`\`\`"$'\n\n'
-prompt+="Releasing early is fine; you need to write the board again (a verdict, a Todo move, a hold), re-acquire with exactly \`$LEASE_OWNER\` as above. If that acquire answers HELD by any other owner (\`momo\`, another agent, or another pass or turn of your own desk under a different owner string), another driver is writing the board: do not write it, and leave the transition for the next pass. The launcher's own release at exit is a no-op once you have released."$'\n'
+prompt+="Releasing early is fine; you need to write the board again (a verdict, a Todo move, a hold), re-acquire with exactly \`$LEASE_OWNER\` as above. If that acquire answers HELD by any other owner (an interactive session, another agent, or another pass or turn of your own desk under a different owner string), another driver is writing the board: do not write it, and leave the transition for the next pass. The launcher's own release at exit is a no-op once you have released."$'\n'
 set +e
 HERMES_PROFILE_NAME="$PROFILE_NAME" "$ROLE_LAUNCHER" chat -Q --source "$SESSION_SOURCE" --max-turns 90 -q "$prompt"
 status=$?

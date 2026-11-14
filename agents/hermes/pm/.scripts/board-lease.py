@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""momo-wip-lock — shared board-driver lease so interactive Momo and the Hermes
-sentinel never double-drive one board (momo E2/S2.3, the coexistence gate).
+"""board-lease — shared board-driver lease so an interactive session and a Hermes
+agent pass never double-drive one board (formerly momo-wip-lock.py).
 
 It is NOT a WIP limit. It serializes short board selection and transitions
 only, so two drivers never write the board in the same instant. It never gates
 how many tickets are in progress and must never be used to refuse dispatching a
 different ready ticket: a PM runs many workers in parallel, one owner per
-ticket. (The file keeps its `wip` name so deployed desks keep working.)
+ticket. (Formerly momo-wip-lock.py; the CLI and lease file format are unchanged.)
 Release this driver lease before waiting on workers.
 
 Both drivers acquire the SAME advisory lease (a JSON file, conventionally
 <runtime>/wip-driver.lock) before a board-driving pass. The lease PERSISTS across
-processes — it is deliberately NOT a held flock, because a Momo pass spans many
+processes — it is deliberately NOT a held flock, because a board pass spans many
 separate tool-call/bash invocations over minutes. flock is used only to serialize
 the check-and-set so two acquirers can't race. A lease is respected while its
 heartbeat is fresh (now - heartbeat_at < ttl); a stale lease (holder died without
 releasing) can be stolen after it expires.
 
-Owners are free strings by convention: "momo" (interactive), "claude:<job>" (a
+Owners are free strings by convention: "interactive" (a person-driven session), "claude:<job>" (a
 wrapper job) or "hermes:<agent_id>:<pass-or-turn tag>" (a Hermes agent). ONE owner
 string per driving pass or turn, unique to it: two passes of the same agent (a
 heartbeat pass and a Telegram/Bloodbank turn) are two drivers and must serialize,
@@ -38,7 +38,7 @@ off for nothing. The rules:
   * An agent acquiring on its own (no launcher) picks one owner for the turn,
     "hermes:<agent_id>:<turn tag>", writes it out literally and reuses that exact
     string, so its own re-acquire/refresh is reentrant. It never regenerates it.
-  * Any other fresh owner (momo, a job, another agent, another pass of your own
+  * Any other fresh owner (an interactive session, a job, another agent, another pass of your own
     desk) is another driver: back off.
 A reentrant acquire keeps the existing ttl unless --ttl is given, so a wrapper's
 long pass lease is never shortened by the agent re-asserting it.
