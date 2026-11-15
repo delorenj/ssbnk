@@ -119,15 +119,15 @@ done
 set +f
 (( ${#present[@]} )) || { log "no land paths exist here; nothing to land"; exit 0; }
 
-# Paths someone has staged (an add, an rm --cached, a partial add) are theirs: skip them.
-staged=$'\n'
-while IFS= read -r -d '' f; do staged+="$f"$'\n'; done < <(git diff --cached --name-only -z -- "${present[@]}")
-
 declare -a files=()
 young=0; wait_for=0
 collect() {  # fills files[]; young = files still inside the quiet window, wait_for = seconds until the youngest settles
-  local now f m left
+  local now f m left staged
   files=(); young=0; wait_for=0
+  # Paths someone has staged (an add, an rm --cached, a partial add) are theirs: skip them.
+  # Read fresh on every collect: another agent may stage during the settle wait.
+  staged=$'\n'
+  while IFS= read -r -d '' f; do staged+="$f"$'\n'; done < <(git diff --cached --name-only -z -- "${present[@]}")
   now="$(date +%s)"
   while IFS= read -r -d '' f; do
     [[ -f "$f" && ! -L "$f" ]] || continue
