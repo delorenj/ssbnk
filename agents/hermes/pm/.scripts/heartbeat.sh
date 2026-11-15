@@ -306,4 +306,9 @@ tmp = path.with_suffix(path.suffix + ".tmp"); tmp.write_text(json.dumps(state, i
 print(0 if state.get("status") in {"active","blocked","stalled","idle"} else exit_code)
 PYEOF
 )"
+# No dangling work (2026-11-15): commit and push the pass's own evidence files. Never fails the pass.
+LAND_SCRIPT="$ROLE_DIR/.scripts/land-outputs.sh"
+if [[ -f "$LAND_SCRIPT" && ! -L "$LAND_SCRIPT" ]]; then
+  ROLE_DIR="$ROLE_DIR" REPO_ROOT="$REPO_ROOT" bash "$LAND_SCRIPT" || true
+fi
 exit "$runner_exit"

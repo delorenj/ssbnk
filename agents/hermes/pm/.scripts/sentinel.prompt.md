@@ -105,6 +105,11 @@ before the general reconcile below.
    dispatches triaged Todo tickets in that order into the two implementation slots. Move at
    most 2 tickets up from Backlog per pass, only with acceptance criteria and in rank order.
    Create or refresh the evidence file for a ticket you touch. You do not delegate workers.
+   Write evidence only under `_bmad-output/implementation-artifacts/issue-evidence/` (or the
+   role's `land.paths`): after the pass the launcher commits and pushes those paths itself
+   (`.scripts/land-outputs.sh`), and anything written elsewhere dangles. When you see a worktree,
+   branch or dirty checkout file that holds finished work, say so in the pass report and on its
+   ticket: no dangling work.
 5. **Verdicts.** A ticket waiting for a verdict is In Progress with `lifecycle:review`. The
    verdict giver is the Launch Director where the project has one, otherwise you (judge the evidence comment against the acceptance criteria; missing evidence is UNKNOWN, never a pass). The verdict is `ACCEPTED` or `SENT BACK: <failing criterion>`.
    - `ACCEPTED`: run the close gate (`.scripts/sentinel/bin/issue-close-gate.sh <ISSUE>`, a hard
