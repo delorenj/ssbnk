@@ -20,7 +20,12 @@
 #      belongs to someone else and is left alone. A path another agent has
 #      staged is skipped too, so its index entry is never touched.
 #   3. Skips a file written in the last LAND_QUIET_SECONDS (default 30): it may
-#      still be mid-write. The next pass picks it up.
+#      still be mid-write. The pass writes its own report seconds before this
+#      runs, so when anything is that fresh it waits once (at most
+#      LAND_SETTLE_SECONDS, default the quiet window) and collects again: a
+#      file that stopped changing lands in THIS pass, one still being written
+#      is left for the next. (2026-11-15: without the wait every pass's own
+#      report landed one pass late.)
 #   4. Commits exactly those paths (`git commit --only`), so nothing another
 #      agent staged rides along. The global guard hooks run; if the batch is
 #      refused, each file is retried alone and only refused files are unstaged
@@ -34,15 +39,30 @@
 #      conflicting merge is not attempted: it is logged and retried next pass.
 #
 # It never fails the heartbeat: every exit is 0. LAND_OUTPUTS=0 turns it off.
+# Every log line is also appended to runtime/land-outputs.log (kept to its last
+# 2000 lines), the receipt an auditor reads after the pass.
 set -uo pipefail
 
 ROLE_DIR="${ROLE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ROLE_YAML="$ROLE_DIR/role.yaml"
 ROLE_YAML_READER="$ROLE_DIR/.scripts/lib/role-yaml.py"
 QUIET="${LAND_QUIET_SECONDS:-30}"
+SETTLE="${LAND_SETTLE_SECONDS:-$QUIET}"
 NET_TIMEOUT="${LAND_NET_TIMEOUT_SECONDS:-120}"
+RUNTIME_DIR="$ROLE_DIR/runtime"
+BLOCKED_FILE="$RUNTIME_DIR/land-outputs-blocked.txt"
+RECEIPT="$RUNTIME_DIR/land-outputs.log"
 
-log() { printf '[land-outputs] %s\n' "$*"; }
+log() {
+  printf '[land-outputs] %s\n' "$*"
+  { mkdir -p "$RUNTIME_DIR" && printf '%s [land-outputs] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$RECEIPT"; } 2>/dev/null || true
+}
+trim_receipt() {
+  [[ -f "$RECEIPT" ]] || return 0
+  (( $(wc -l < "$RECEIPT") > 2000 )) || return 0
+  tail -n 2000 "$RECEIPT" > "$RECEIPT.tmp" 2>/dev/null && mv -f "$RECEIPT.tmp" "$RECEIPT" 2>/dev/null || true
+}
+trap trim_receipt EXIT
 net() {  # bounded network git; a hung ssh must not hold the heartbeat lock or the board lease
   if command -v timeout >/dev/null 2>&1; then timeout "$NET_TIMEOUT" git "$@"
   elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$NET_TIMEOUT" git "$@"
@@ -77,8 +97,6 @@ on_default() {  # 0 when HEAD is refs/heads/$default and no multi-step operation
 }
 on_default || exit 0
 
-RUNTIME_DIR="$ROLE_DIR/runtime"
-BLOCKED_FILE="$RUNTIME_DIR/land-outputs-blocked.txt"
 blocked() {  # leave a marker the next pass reports (the sentinel prompt reads it)
   mkdir -p "$RUNTIME_DIR" 2>/dev/null && printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" > "$BLOCKED_FILE"
 }
@@ -105,15 +123,32 @@ set +f
 staged=$'\n'
 while IFS= read -r -d '' f; do staged+="$f"$'\n'; done < <(git diff --cached --name-only -z -- "${present[@]}")
 
-now="$(date +%s)"
 declare -a files=()
-while IFS= read -r -d '' f; do
-  [[ -f "$f" && ! -L "$f" ]] || continue
-  [[ "$staged" == *$'\n'"$f"$'\n'* ]] && continue
-  m="$(stat -c %Y -- "$f" 2>/dev/null || stat -f %m -- "$f" 2>/dev/null || echo "$now")"
-  (( now - m >= QUIET )) || continue
-  files+=("$f")
-done < <(git ls-files -z -m -o --exclude-standard -- "${present[@]}" | sort -zu)
+young=0; wait_for=0
+collect() {  # fills files[]; young = files still inside the quiet window, wait_for = seconds until the youngest settles
+  local now f m left
+  files=(); young=0; wait_for=0
+  now="$(date +%s)"
+  while IFS= read -r -d '' f; do
+    [[ -f "$f" && ! -L "$f" ]] || continue
+    [[ "$staged" == *$'\n'"$f"$'\n'* ]] && continue
+    m="$(stat -c %Y -- "$f" 2>/dev/null || stat -f %m -- "$f" 2>/dev/null || echo "$now")"
+    left=$(( QUIET - (now - m) ))
+    if (( left > 0 )); then
+      young=$((young + 1)); (( left > wait_for )) && wait_for=$left
+      continue
+    fi
+    files+=("$f")
+  done < <(git ls-files -z -m -o --exclude-standard -- "${present[@]}" | sort -zu)
+}
+collect
+if (( young && SETTLE > 0 )); then
+  (( wait_for > SETTLE )) && wait_for=$SETTLE
+  log "$young file(s) written in the last ${QUIET}s; waiting ${wait_for}s for them to settle"
+  sleep "$((wait_for + 1))"
+  collect
+fi
+(( young )) && log "$young file(s) still changing; left for the next pass"
 
 commit_paths() {  # commit_paths <path>... ; 0 on success, unstages its own paths on refusal
   git add -- "$@" 2>/dev/null || { git reset -q -- "$@" 2>/dev/null; return 1; }
