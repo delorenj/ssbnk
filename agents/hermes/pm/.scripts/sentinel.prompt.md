@@ -110,6 +110,8 @@ before the general reconcile below.
    (`.scripts/land-outputs.sh`), and anything written elsewhere dangles. When you see a worktree,
    branch or dirty checkout file that holds finished work, say so in the pass report and on its
    ticket: no dangling work.
+   If `runtime/land-outputs-blocked.txt` exists, the last landing was refused or conflicted: put
+   its line in the pass report so a person integrates it.
 5. **Verdicts.** A ticket waiting for a verdict is In Progress with `lifecycle:review`. The
    verdict giver is the Launch Director where the project has one, otherwise you (judge the evidence comment against the acceptance criteria; missing evidence is UNKNOWN, never a pass). The verdict is `ACCEPTED` or `SENT BACK: <failing criterion>`.
    - `ACCEPTED`: run the close gate (`.scripts/sentinel/bin/issue-close-gate.sh <ISSUE>`, a hard

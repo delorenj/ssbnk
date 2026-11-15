@@ -25,7 +25,9 @@
 #      agent staged rides along. The global guard hooks run; if the batch is
 #      refused, each file is retried alone and only refused files are unstaged
 #      (they were unstaged before, so nothing of anyone else's is reset).
-#   5. Pushes refs/heads/<default>. If origin moved, the merge is built with
+#   5. Pushes refs/heads/<default>, then fast-forwards the checkout to what it
+#      pushed (--ff-only: it never merges in the worktree or leaves a merge in
+#      progress, and changes nothing when another agent's dirty file is in the way). If origin moved, the merge is built with
 #      `git merge-tree` and `git commit-tree` (object store only, the working
 #      tree and index are untouched) and that merge is pushed; the local branch
 #      simply ends up behind origin, which the next pull fast-forwards. A
@@ -75,6 +77,21 @@ on_default() {  # 0 when HEAD is refs/heads/$default and no multi-step operation
 }
 on_default || exit 0
 
+RUNTIME_DIR="$ROLE_DIR/runtime"
+BLOCKED_FILE="$RUNTIME_DIR/land-outputs-blocked.txt"
+blocked() {  # leave a marker the next pass reports (the sentinel prompt reads it)
+  mkdir -p "$RUNTIME_DIR" 2>/dev/null && printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" > "$BLOCKED_FILE"
+}
+fast_forward() {  # fast-forward the shared checkout to $1 when that is safe; otherwise change nothing
+  # --ff-only never creates a merge or leaves one in progress; it refuses (and changes
+  # nothing) when another agent's dirty file is in the way.
+  on_default >/dev/null || return 0
+  git merge-base --is-ancestor "refs/heads/$default" "$1" 2>/dev/null || return 0
+  [[ "$(git rev-parse "refs/heads/$default")" == "$(git rev-parse "$1")" ]] && return 0
+  if git merge -q --ff-only "$1" >/dev/null 2>&1; then log "fast-forwarded $default"
+  else log "could not fast-forward $default (another agent's dirty file is in the way); next pass retries"; fi
+}
+
 declare -a present=()
 set -f   # land paths are literal, never globbed
 for p in $paths_cfg; do
@@ -103,7 +120,7 @@ commit_paths() {  # commit_paths <path>... ; 0 on success, unstages its own path
   if git commit -q --only -m "evidence($agent): land pass outputs ($# files)
 
 Committed by .scripts/land-outputs.sh after the board pass, so the pass's own
-evidence never dangles in the checkout. Paths: $paths_cfg" -- "$@" >/dev/null 2>&1; then
+evidence never dangles in the checkout. Paths: $paths_cfg" -- "$@" >/dev/null 2>"$gitdir/land-outputs-commit.err"; then
     return 0
   fi
   git reset -q -- "$@" 2>/dev/null || true
@@ -119,7 +136,7 @@ if (( ${#files[@]} )); then
     log "batch commit refused (guard hook or error); retrying file by file"
     landed=0
     for f in "${files[@]}"; do
-      if on_default && commit_paths "$f"; then landed=$((landed + 1)); else log "REFUSED, left for a person: $f"; fi
+      if on_default && commit_paths "$f"; then landed=$((landed + 1)); else log "REFUSED, left for a person: $f ($(tail -n 1 "$gitdir/land-outputs-commit.err" 2>/dev/null))"; blocked "guard refused $f"; fi
     done
     log "committed $landed of ${#files[@]} file(s) one at a time"
   fi
@@ -133,20 +150,27 @@ local_ref="refs/heads/$default"
 net fetch -q origin "$default" 2>/dev/null || { log "fetch failed; will push next pass"; exit 0; }
 remote="refs/remotes/origin/$default"
 ahead="$(git rev-list --count "$remote..$local_ref" 2>/dev/null || echo 0)"
-(( ahead > 0 )) || exit 0
+if (( ahead == 0 )); then
+  fast_forward "$remote"   # catch up after an earlier pass pushed a merge, or after others pushed
+  exit 0
+fi
 target="$(git rev-parse "$local_ref")"
 if ! git merge-base --is-ancestor "$remote" "$local_ref"; then
   # Origin moved. Build the merge in the object store only; never touch the shared worktree.
   if ! tree="$(git merge-tree --write-tree "$local_ref" "$remote" 2>/dev/null)"; then
     log "CONFLICT merging $default with origin/$default (or git too old for merge-tree --write-tree); $ahead commit(s) kept locally, a person must integrate them"
+    blocked "local $default has $ahead commit(s) that conflict with origin/$default; integrate them by hand (land-outputs will not merge in the shared worktree)"
     exit 0
   fi
   target="$(git commit-tree "$tree" -p "$local_ref" -p "$remote" -m "Merge origin/$default into $default (land-outputs, $agent)
 
 Co-Authored-By: land-outputs.sh <noreply@localhost>")" || { log "commit-tree failed; will retry next pass"; exit 0; }
 fi
+on_default || exit 0   # someone started a rebase/checkout meanwhile: push nothing this pass
 if net push -q origin "$target:refs/heads/$default" 2>/dev/null; then
   log "pushed $ahead commit(s) to origin/$default"
+  rm -f "$BLOCKED_FILE"
+  fast_forward "$target"
 else
   log "push failed; commit(s) kept locally for the next pass"
 fi
