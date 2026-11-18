@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 interface Screenshot {
@@ -45,7 +45,61 @@ export default function ScreenshotGallery() {
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [copyStatus, setCopyStatus] = useState<{ message: string; error: boolean } | null>(null);
+  const [copying, setCopying] = useState(false);
+  const copyGeneration = useRef(0);
   const limit = 48;
+
+  function clearSelection() {
+    copyGeneration.current += 1;
+    setSelected(new Set());
+    setCopyStatus(null);
+  }
+
+  function changePage(nextOffset: number) {
+    clearSelection();
+    setOffset(nextOffset);
+  }
+
+  function toggleSelection(filename: string) {
+    copyGeneration.current += 1;
+    setCopyStatus(null);
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(filename)) next.delete(filename);
+      else next.add(filename);
+      return next;
+    });
+  }
+
+  const selectedUrls = Array.from(
+    new Set(
+      screenshots
+        .filter((s) => selected.has(s.filename))
+        .map((s) => new URL(s.url, API_BASE || window.location.origin).href),
+    ),
+  );
+
+  async function copySelection() {
+    if (!selectedUrls.length || copying) return;
+    const generation = ++copyGeneration.current;
+    setCopying(true);
+    setCopyStatus(null);
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(selectedUrls.join("\n"));
+      if (generation === copyGeneration.current) {
+        setCopyStatus({ message: `Copied ${selectedUrls.length} link${selectedUrls.length === 1 ? "" : "s"}.`, error: false });
+      }
+    } catch {
+      if (generation === copyGeneration.current) {
+        setCopyStatus({ message: "Could not copy links. Check clipboard permission and try again.", error: true });
+      }
+    } finally {
+      setCopying(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -118,6 +172,20 @@ export default function ScreenshotGallery() {
         </ToggleGroup>
       </header>
 
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={copySelection}
+          disabled={loading || !!error || !selectedUrls.length || copying}
+          className="rounded-md border px-4 py-2 text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {copying ? "Copying…" : `Copy links (${selectedUrls.length})`}
+        </button>
+        <span role="status" aria-live="polite" className={`text-sm ${copyStatus?.error ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}`}>
+          {copyStatus?.message || (selected.size ? `${selected.size} selected` : "Select screenshots to copy their links")}
+        </span>
+      </div>
+
       {loading ? (
         <div
           aria-live="polite"
@@ -133,7 +201,7 @@ export default function ScreenshotGallery() {
           <p className="text-sm text-muted-foreground">{error}</p>
           <button
             type="button"
-            onClick={() => setReloadKey((key) => key + 1)}
+            onClick={() => { clearSelection(); setReloadKey((key) => key + 1); }}
             className="rounded-md border px-4 py-2 text-sm transition-colors hover:bg-muted"
           >
             Retry
@@ -142,62 +210,76 @@ export default function ScreenshotGallery() {
       ) : view === "grid" ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
           {screenshots.map((s) => (
-            <a
+            <div
               key={s.filename}
-              href={s.url}
-              target="_blank"
-              rel="noopener"
-              className="group relative overflow-hidden rounded-lg border bg-card transition-colors hover:border-foreground/20"
+              className={`relative overflow-hidden rounded-lg border bg-card transition-colors ${selected.has(s.filename) ? "border-primary ring-2 ring-primary" : "hover:border-foreground/20"}`}
             >
-              <div className="aspect-video w-full overflow-hidden bg-muted">
-                <img
-                  src={s.url}
-                  alt={s.filename}
-                  loading="lazy"
-                  className="h-full w-full object-cover transition-transform group-hover:scale-105"
+              <label className="absolute right-2 top-2 z-10 flex cursor-pointer items-center rounded bg-background/95 p-2 shadow-sm">
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${s.filename}`}
+                  checked={selected.has(s.filename)}
+                  onChange={() => toggleSelection(s.filename)}
+                  className="h-5 w-5 accent-primary"
                 />
-              </div>
-              <div className="px-2 py-1.5">
-                <p className="truncate text-xs font-medium">{s.filename}</p>
-                <p className="text-xs text-muted-foreground">
-                  {formatDate(s.timestamp)}
-                  {s.size ? ` · ${formatSize(s.size)}` : ""}
-                </p>
-              </div>
-            </a>
+              </label>
+              <a href={s.url} target="_blank" rel="noopener" className="group block" aria-label={`Open ${s.filename}`}>
+                <div className="aspect-video w-full overflow-hidden bg-muted">
+                  <img
+                    src={s.url}
+                    alt={s.filename}
+                    loading="lazy"
+                    className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                  />
+                </div>
+                <div className="px-2 py-1.5">
+                  <p className="truncate text-xs font-medium">{s.filename}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDate(s.timestamp)}
+                    {s.size ? ` · ${formatSize(s.size)}` : ""}
+                  </p>
+                </div>
+              </a>
+            </div>
           ))}
         </div>
       ) : (
         <div className="divide-y rounded-lg border">
           {screenshots.map((s) => (
-            <a
+            <div
               key={s.filename}
-              href={s.url}
-              target="_blank"
-              rel="noopener"
-              className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-muted/50"
+              className={`flex items-center gap-3 px-4 py-3 transition-colors ${selected.has(s.filename) ? "bg-primary/10 ring-2 ring-inset ring-primary" : "hover:bg-muted/50"}`}
             >
-              <div className="h-12 w-20 shrink-0 overflow-hidden rounded bg-muted">
-                <img
-                  src={s.url}
-                  alt={s.filename}
-                  loading="lazy"
-                  className="h-full w-full object-cover"
-                />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{s.filename}</p>
-                {s.original_name && s.original_name !== s.filename && (
-                  <p className="truncate text-xs text-muted-foreground">
-                    {s.original_name}
-                  </p>
-                )}
-              </div>
-              <div className="text-right text-xs text-muted-foreground">
-                <p>{formatDate(s.timestamp)}</p>
-                {s.size ? <p>{formatSize(s.size)}</p> : null}
-              </div>
-            </a>
+              <input
+                type="checkbox"
+                aria-label={`Select ${s.filename}`}
+                checked={selected.has(s.filename)}
+                onChange={() => toggleSelection(s.filename)}
+                className="h-5 w-5 shrink-0 accent-primary"
+              />
+              <a href={s.url} target="_blank" rel="noopener" className="flex min-w-0 flex-1 items-center gap-4" aria-label={`Open ${s.filename}`}>
+                <div className="h-12 w-20 shrink-0 overflow-hidden rounded bg-muted">
+                  <img
+                    src={s.url}
+                    alt={s.filename}
+                    loading="lazy"
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{s.filename}</p>
+                  {s.original_name && s.original_name !== s.filename && (
+                    <p className="truncate text-xs text-muted-foreground">
+                      {s.original_name}
+                    </p>
+                  )}
+                </div>
+                <div className="text-right text-xs text-muted-foreground">
+                  <p>{formatDate(s.timestamp)}</p>
+                  {s.size ? <p>{formatSize(s.size)}</p> : null}
+                </div>
+              </a>
+            </div>
           ))}
         </div>
       )}
@@ -205,7 +287,7 @@ export default function ScreenshotGallery() {
       {(offset > 0 || hasMore) && (
         <div className="mt-8 flex justify-center gap-4">
           <button
-            onClick={() => setOffset(Math.max(0, offset - limit))}
+            onClick={() => changePage(Math.max(0, offset - limit))}
             disabled={offset === 0}
             className="rounded-md border px-4 py-2 text-sm transition-colors hover:bg-muted disabled:opacity-40"
           >
@@ -215,7 +297,7 @@ export default function ScreenshotGallery() {
             {offset + 1}–{Math.min(offset + limit, total)} of {total}
           </span>
           <button
-            onClick={() => setOffset(offset + limit)}
+            onClick={() => changePage(offset + limit)}
             disabled={!hasMore}
             className="rounded-md border px-4 py-2 text-sm transition-colors hover:bg-muted disabled:opacity-40"
           >
