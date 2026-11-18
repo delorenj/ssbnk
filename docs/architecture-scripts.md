@@ -26,7 +26,9 @@ with `SSBNK_STATE_DIR` and `SSBNK_HOSTED_DIR`.
 
 The script saves the current text clipboard, loads the image with `wl-copy`,
 uses `ydotool` to send Ctrl+V, and restores the previous text. It must run in
-the user's desktop session. It isn't part of the public container.
+the user's desktop session. It isn't part of the public container. See the
+[host setup and real-device checklist](./remote-clipboard-setup.md) for the
+GNOME shortcut, dependencies, and failure checks.
 
 ## Remote upload integration
 

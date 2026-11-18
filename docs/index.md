@@ -26,6 +26,7 @@ Use these pages to understand the implementation and its contracts:
 - [Go service architecture](./architecture-watcher.md)
 - [UI architecture](./architecture-ui.md)
 - [Supporting scripts](./architecture-scripts.md)
+- [Remote clipboard and desktop verification](./remote-clipboard-setup.md)
 - [Source tree analysis](./source-tree-analysis.md)
 - [UI component inventory](./component-inventory-ui.md)
 - [Data models](./data-models-watcher.md)

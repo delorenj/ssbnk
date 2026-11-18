@@ -161,8 +161,18 @@ func runClipboardBridge(ctx context.Context, options ClipboardBridgeOptions) err
 	}
 
 	latestPath := filepath.Join(options.StateDir, latestURLMarker)
-	lastCopied := ""
+	var lastCopied os.FileInfo
 	copyLatest := func() {
+		info, err := os.Stat(latestPath)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				log.Printf("Clipboard bridge: failed to stat latest URL: %v", err)
+			}
+			return
+		}
+		if lastCopied != nil && os.SameFile(lastCopied, info) {
+			return
+		}
 		contents, err := os.ReadFile(latestPath)
 		if err != nil {
 			if !os.IsNotExist(err) {
@@ -171,14 +181,14 @@ func runClipboardBridge(ctx context.Context, options ClipboardBridgeOptions) err
 			return
 		}
 		latest := strings.TrimSpace(string(contents))
-		if latest == "" || latest == lastCopied {
+		if latest == "" {
 			return
 		}
 		if err := options.Copy(ctx, latest); err != nil {
 			log.Printf("Clipboard bridge: wl-copy failed: %v", err)
 			return
 		}
-		lastCopied = latest
+		lastCopied = info
 		log.Printf("Clipboard bridge: copied latest URL")
 	}
 

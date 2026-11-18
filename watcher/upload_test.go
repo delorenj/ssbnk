@@ -49,6 +49,33 @@ func TestUploadAcceptsSniffedImageAndWritesMetadata(t *testing.T) {
 	}
 }
 
+func TestUploadPublishesHostFilenameAndURL(t *testing.T) {
+	t.Setenv("SSBNK_UPLOAD_KEY", "test-upload-key")
+	config, _ := createTestConfig(t)
+	req := newMultipartUploadRequest(t, "remote.png", testPNG, "test-upload-key")
+	recorder := httptest.NewRecorder()
+	handleUpload(recorder, req, config)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("upload status = %d, body = %q", recorder.Code, recorder.Body.String())
+	}
+	var response map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	filename, err := readMarker(filepath.Join(config.StateDir, lastScreenshotMarker))
+	if err != nil || filename != response["filename"] || filepath.Base(filename) != filename {
+		t.Fatalf("host marker = %q (%v), response = %#v", filename, err, response)
+	}
+	contents, err := os.ReadFile(filepath.Join(config.DataDir, "hosted", filename))
+	if err != nil || !bytes.Equal(contents, testPNG) {
+		t.Fatalf("hosted image missing or different: %v", err)
+	}
+	url, err := readMarker(filepath.Join(config.StateDir, latestURLMarker))
+	if err != nil || url != response["url"] || url != config.BaseURL+"/"+filename {
+		t.Fatalf("host URL marker = %q (%v), response = %#v", url, err, response)
+	}
+}
+
 func TestUploadRejectsSpoofedImageWithoutCreatingFiles(t *testing.T) {
 	t.Setenv("SSBNK_UPLOAD_KEY", "test-upload-key")
 	config, _ := createTestConfig(t)

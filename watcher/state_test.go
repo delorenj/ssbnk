@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -74,6 +75,29 @@ func TestStateFailureDoesNotFailScreenshotIngestion(t *testing.T) {
 	}
 }
 
+func TestLocalScreenshotPublishesHostFilenameAndURL(t *testing.T) {
+	config, _ := createTestConfig(t)
+	source := filepath.Join(config.ScreenshotDir, "local.png")
+	if err := os.WriteFile(source, testPNG, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := processScreenshot(source, config); err != nil {
+		t.Fatal(err)
+	}
+	filename, err := readMarker(filepath.Join(config.StateDir, lastScreenshotMarker))
+	if err != nil || filepath.Base(filename) != filename || filename == "" {
+		t.Fatalf("local marker = %q, %v", filename, err)
+	}
+	contents, err := os.ReadFile(filepath.Join(config.DataDir, "hosted", filename))
+	if err != nil || !bytes.Equal(contents, testPNG) {
+		t.Fatalf("local hosted image missing or different: %v", err)
+	}
+	url, err := readMarker(filepath.Join(config.StateDir, latestURLMarker))
+	if err != nil || url != config.BaseURL+"/"+filename {
+		t.Fatalf("local URL marker = %q, %v", url, err)
+	}
+}
+
 func TestClipboardBridgeConsumesAtomicURLMarkers(t *testing.T) {
 	stateDir := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -137,6 +161,36 @@ func TestClipboardBridgeRetriesFailedCopyViaPolling(t *testing.T) {
 	}()
 	wantCopiedURL(t, attempts, "https://ss.test/retry.png")
 	wantCopiedURL(t, attempts, "https://ss.test/retry.png")
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClipboardBridgeCopiesRepeatedURLOnNewPublication(t *testing.T) {
+	stateDir := t.TempDir()
+	url := "https://ss.test/repeated.png"
+	if err := writeIngestionState(stateDir, "repeated.png", url); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	copied := make(chan string, 4)
+	done := make(chan error, 1)
+	go func() {
+		done <- runClipboardBridge(ctx, ClipboardBridgeOptions{
+			StateDir: stateDir, PollInterval: 10 * time.Millisecond,
+			Copy: func(_ context.Context, text string) error {
+				copied <- text
+				return nil
+			},
+		})
+	}()
+	wantCopiedURL(t, copied, url)
+	if err := writeIngestionState(stateDir, "repeated.png", url); err != nil {
+		t.Fatal(err)
+	}
+	wantCopiedURL(t, copied, url)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)

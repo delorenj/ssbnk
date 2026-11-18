@@ -79,13 +79,22 @@ stack remains visible and auditable in the central DeLoContainers hub. See
 
 ## Remote clients and paste-image helper
 
-Run `scripts/install-remote-client.sh` from a clone to install the Linux or
-macOS upload watcher. Credentials belong in the client's private runtime config,
-not this repository.
+On **tiny-chungus** (Linux) and **carries-macbook-air** (macOS), run
+`scripts/install-remote-client.sh` from a clone on each machine. Set
+`SSBNK_HOST=https://ss.delo.sh`, `SSBNK_UPLOAD_KEY` (the server's upload key),
+and `SSBNK_SCREENSHOT_DIR` (colon-separated folders) in private
+`~/.config/ssbnk/remote.env`. The installer enables the Linux
+`ssbnk-remote-upload.service` user unit or the macOS
+`sh.delo.ss.remote-upload` launch agent. See the
+[desktop verification guide](docs/remote-clipboard-setup.md) for login/reboot
+checks, the isolated host clipboard bridge, GNOME binding, and a timed
+end-to-end procedure.
 
-`scripts/paste-image.sh` reads the canonical state marker and puts the image
-payload on the Wayland clipboard before simulating paste. Its host data roots
-can be overridden with `SSBNK_STATE_DIR` and `SSBNK_HOSTED_DIR`.
+The server writes **filename-only** `state/last-screenshot` and `state/latest-url`.
+The host shortcut reads those markers and the hosted image from host-visible
+paths (not container paths). It offers image data for Ctrl+Shift+V and restores
+the prior text clipboard. `SSBNK_STATE_DIR` and `SSBNK_HOSTED_DIR` override its
+host defaults. Shell and Go source tests do not certify a real desktop paste.
 
 ## License
 
