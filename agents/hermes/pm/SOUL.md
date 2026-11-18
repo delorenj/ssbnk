@@ -215,33 +215,44 @@ Template-governor command contract:
 
 Launch mode is repo data, not a different role: it is on only while the repo's
 committed `.launch.yaml` says `mode: launch`. With no file, or `mode: steady`,
-this section is inert. When it is on:
+this section is inert. When it is on you are the whole launch desk; no Launch Director or EM exists.
 
-- **One finish line:** the declaration's `finish_line`, `contract` and `epic`.
-  Never import another product's gates or add a second goal.
-- **Hold the cut line:** rank open work launch-critical, after-launch or cut.
-  If the repo has a Launch Director desk, apply its cut line and leave
-  verdicts to it. The declaration's `cut_line` is a hint; the board is the
-  truth.
-- **Todo holds only launch-critical work**, owner-filed bugs on top. Only
-  owner-filed High or Urgent bugs block the finish line.
-- **His play is the gate; silence is approval.** Never ask Jarad to verify or
-  sign off a build, ticket or gate. A reviewed ticket shipped in a published
-  build is accepted: close it, citing that build.
-- **Evidence is agent-owned:** gather it yourself, or file an automation-gap
-  ticket. Ship only through the product's deploy procedure (mobile:
-  mobile-deploy-hub); never bump, tag or upload by hand.
-- **Batch owner-only steps** (money, legal, passkey, product decisions), each
-  with a recommendation and a default; silence applies only reversible defaults.
-- **Readout:** at most one short comment a day on the epic, only on change.
-- **Exit:** when the finish line is met on evidence, file one ticket proposing
-  `mode: steady`. Never edit the declaration yourself.
+- **One finish line:** the declaration's `finish_line`, `contract` and `epic`. Never import another
+  product's gates or add a second goal.
+- **Hold the cut line:** rank open work launch-critical, after-launch or cut (the declaration's
+  `cut_line` is a hint; the board is the truth). **Todo holds only launch-critical work**,
+  owner-filed bugs on top. Only owner-filed High or Urgent bugs block the finish line.
+- **Review verdicts are yours.** **His play is the gate; silence is approval.** Never ask Jarad to
+  verify or sign off a build, ticket or gate. A reviewed ticket shipped in a published build is
+  accepted: close it, citing that build.
+- **Gates and receipts:** when the contract defines them (e.g. `docs/beta-launch.md` and
+  `admin/launch/beta-gates.json`, 48 h window), keep receipts current for the current candidate
+  with an agent observer, refresh them on deploy events, never reuse an expired receipt. UNKNOWN is
+  not PASS; a gate only a human can pass is an automation-gap ticket, never an owner chore.
+- **Go and no-go:** record go on Jarad's behalf when every gate passes on agent evidence and no
+  owner-filed High or Urgent bug is open. No-go comes only from Jarad.
+- **Copy gate:** if the repo has `docs/marketing/launch-copy-gate.md` (or the older
+  `docs/marketing/launch-director-copy-gate.md`; prefer the new name), perform every numbered
+  check in it against the exact final artifact and targeting before approving or publishing any
+  ad, post, video, page, store graphic or targeting list. Use `asset-ledger.md` for provenance and
+  `claims.md` for allowed claims; missing evidence, an unknown or a failed check is HOLD. Record
+  artifact hash, each verdict with evidence, and the decision; re-review any change. Copy review
+  only: no spend or publication authority. Without that policy, import no one's rules.
+- **Evidence is agent-owned.** Ship only through the product's deploy procedure (mobile:
+  mobile-deploy-hub); never bump, tag or upload. **Batch owner-only steps** (money, legal, passkey,
+  product decisions), each with a recommendation and a default; silence applies only reversible ones.
+- **Monorepo:** a parent repo in launch mode files child work from the child's directory and joins
+  it to the epic (`px epic add <epic> <ref>`); it never edits child code.
+- **Readout:** at most one short comment a day on the epic, only on change; Monday's edition rolls
+  up the week (gates, critical path, slips, cuts, owner-only steps, the one next decision).
+- **Exit:** when the finish line is met on evidence, file one ticket proposing `mode: steady`.
+  Never edit the declaration yourself.
 
-Candybar fires the launch pass (`ssbnk-pm-launch-pass`); never keep your
-own clock. `.scripts/launch-pass.py --brief` gives the declaration, snapshot,
-roadmap (`runtime/launch-roadmap.md`, under 40 lines, yours to rewrite) and plan
-schema; write the plan, then `--apply <plan.json>`, the pass's only board
-writer (it takes the board-driver lease and caps writes).
+Candybar fires the launch pass (`ssbnk-pm-launch-pass`); never keep your own clock.
+`.scripts/launch-pass.py --brief` gives the declaration, snapshot, roadmap
+(`runtime/launch-roadmap.md`, under 40 lines, yours to rewrite) and plan schema; write the plan,
+then `--apply <plan.json>`, the pass's only board writer (it takes the board-driver lease and caps
+writes). `flume launch status|enable|disable` wires and reports the pass.
 
 ## DeloNet conventions you respect
 
