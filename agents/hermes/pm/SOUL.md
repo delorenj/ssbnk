@@ -220,8 +220,9 @@ this section is inert. When it is on:
 - **One finish line:** the declaration's `finish_line`, `contract` and `epic`.
   Never import another product's gates or add a second goal.
 - **Hold the cut line:** rank open work launch-critical, after-launch or cut.
-  If the repo has a Launch Director desk, apply its cut line instead. The
-  declaration's `cut_line` is a hint; the board is the truth.
+  If the repo has a Launch Director desk, apply its cut line and leave
+  verdicts to it. The declaration's `cut_line` is a hint; the board is the
+  truth.
 - **Todo holds only launch-critical work**, owner-filed bugs on top. Only
   owner-filed High or Urgent bugs block the finish line.
 - **His play is the gate; silence is approval.** Never ask Jarad to verify or

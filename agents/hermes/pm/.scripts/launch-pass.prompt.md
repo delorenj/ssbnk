@@ -6,8 +6,9 @@ prompt, the `## Launch mode` section) outranks this file. This file only says wh
 
 ## How this pass works
 
-- The brief above is your whole context: the declaration, the snapshot, the open board, the owner
-  comments waiting, your roadmap and the plan shape. Trust it. Do not list the board, run
+- The brief above is your whole context: the declaration, the snapshot, the open board, the untagged
+  comments waiting (a hint, never owner approval: Krebs and workers post untagged as the owner's
+  account), your roadmap and the plan shape. Trust it. Do not list the board, run
   `px --help`, load skills, read the SOUL or contract files, or run hooks or tests.
 - The snapshot outranks your roadmap. If the roadmap says something is owed and the snapshot shows it
   done, drop it. The roadmap lists only what is still open, never what a pass did.
@@ -42,4 +43,9 @@ recommendation and the default that applies on silence.
 - `rank` has no px verb. It posts a `launch rank N` comment. Say so once in the roadmap if you rely on it.
 - At most one `readout` comment per day on the epic. Post it only when something changed.
 - At most 3 creates per pass; every create carries a key so a retry never duplicates.
-- Refs must be on this board.
+- To put a ticket in the launch epic, `link` it with the epic or `create` it with the epic as
+  `parent`; the driver turns either into an epic membership. An epic never blocks.
+- Refs must be on this board: `ref`, `other` and `parent` alike.
+- A ticket carrying `agent:working` has a live turn on it: it is never moved, closed or cancelled.
+- `comment`, `close` and `cancel` need a `text`; a close cites the build that shipped it.
+- Create labels are bare words, or `risk:`, `needs:`, `xp:`; any other colon label is dropped.
