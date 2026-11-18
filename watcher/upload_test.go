@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -13,10 +16,26 @@ import (
 	"testing"
 )
 
-var testPNG = append(
-	[]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'},
-	bytes.Repeat([]byte{0}, 64)...,
-)
+var testPNG = func() []byte {
+	var data bytes.Buffer
+	img := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(0, 0, color.Black)
+	if err := png.Encode(&data, img); err != nil {
+		panic(err)
+	}
+	return data.Bytes()
+}()
+
+func assertDecodablePNG(t *testing.T, contents []byte) {
+	t.Helper()
+	decoded, err := png.Decode(bytes.NewReader(contents))
+	if err != nil {
+		t.Fatalf("hosted PNG cannot be decoded: %v", err)
+	}
+	if decoded.Bounds() != image.Rect(0, 0, 2, 2) {
+		t.Fatalf("unexpected PNG bounds: %v", decoded.Bounds())
+	}
+}
 
 func TestUploadAcceptsSniffedImageAndWritesMetadata(t *testing.T) {
 	t.Setenv("SSBNK_UPLOAD_KEY", "test-upload-key")
@@ -43,6 +62,7 @@ func TestUploadAcceptsSniffedImageAndWritesMetadata(t *testing.T) {
 	if !bytes.Equal(contents, testPNG) {
 		t.Fatal("stored upload differs from request bytes")
 	}
+	assertDecodablePNG(t, contents)
 	metadataEntries, err := os.ReadDir(filepath.Join(config.DataDir, "metadata"))
 	if err != nil || len(metadataEntries) != 1 {
 		t.Fatalf("metadata entries = %d, %v", len(metadataEntries), err)
@@ -70,6 +90,7 @@ func TestUploadPublishesHostFilenameAndURL(t *testing.T) {
 	if err != nil || !bytes.Equal(contents, testPNG) {
 		t.Fatalf("hosted image missing or different: %v", err)
 	}
+	assertDecodablePNG(t, contents)
 	url, err := readMarker(filepath.Join(config.StateDir, latestURLMarker))
 	if err != nil || url != response["url"] || url != config.BaseURL+"/"+filename {
 		t.Fatalf("host URL marker = %q (%v), response = %#v", url, err, response)

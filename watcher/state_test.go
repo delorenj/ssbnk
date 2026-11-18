@@ -92,6 +92,7 @@ func TestLocalScreenshotPublishesHostFilenameAndURL(t *testing.T) {
 	if err != nil || !bytes.Equal(contents, testPNG) {
 		t.Fatalf("local hosted image missing or different: %v", err)
 	}
+	assertDecodablePNG(t, contents)
 	url, err := readMarker(filepath.Join(config.StateDir, latestURLMarker))
 	if err != nil || url != config.BaseURL+"/"+filename {
 		t.Fatalf("local URL marker = %q, %v", url, err)

@@ -32,15 +32,26 @@ case "${filename,,}" in
     *) fail "Unsupported screenshot format: $filename" ;;
 esac
 
-# Never destroy a clipboard we cannot read. In particular, do not turn a failed
-# wl-paste into an empty clipboard on restoration.
-saved_clip=$(wl-paste --no-newline) || fail "Could not read text clipboard"
+# Never destroy a clipboard we cannot read. Save to a file because command
+# substitution strips trailing newlines from text clipboard contents.
+saved_clip=$(mktemp "${TMPDIR:-${XDG_RUNTIME_DIR}}/ssbnk-clipboard.XXXXXX") || fail "Could not save text clipboard"
+if ! wl-paste --no-newline > "$saved_clip"; then
+    rm -f "$saved_clip"
+    fail "Could not read text clipboard"
+fi
 restore=false
 restore_clipboard() {
+    status=$?
+    trap - EXIT
     if [ "$restore" = true ]; then
-        printf '%s' "$saved_clip" | wl-copy --type 'text/plain;charset=utf-8' ||
+        if ! wl-copy --type 'text/plain;charset=utf-8' < "$saved_clip"; then
             notify-send "ssbnk" "Could not restore text clipboard" 2>/dev/null || true
+            printf 'ssbnk: Could not restore text clipboard\n' >&2
+            status=1
+        fi
     fi
+    rm -f "$saved_clip"
+    exit "$status"
 }
 trap restore_clipboard EXIT
 restore=true

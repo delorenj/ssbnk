@@ -7,7 +7,8 @@ mkdir -p "$root/bin" "$root/state" "$root/hosted"
 script="$(cd "$(dirname "$0")" && pwd)/paste-image.sh"
 export SSBNK_STATE_DIR="$root/state" SSBNK_HOSTED_DIR="$root/hosted"
 export SSBNK_TEST_ROOT="$root" PATH="$root/bin:$PATH"
-printf 'original URL' > "$root/clipboard"
+printf 'original URL' > "$root/original"
+cp "$root/original" "$root/clipboard"
 printf 'image bytes' > "$root/hosted/shot.png"
 printf 'shot.png\n' > "$root/state/last-screenshot"
 
@@ -25,6 +26,10 @@ case "${0##*/}" in
         cat "$root/clipboard" ;;
     wl-copy)
         printf 'wl-copy %s\n' "$*" >> "$root/calls"
+        if [[ "$*" == *'text/plain;charset=utf-8'* ]] && [ -f "$root/fail-restore" ]; then
+            printf 'simulated restore failure\n' >&2
+            exit 7
+        fi
         cat > "$root/clipboard" ;;
     ydotool)
         printf 'ydotool %s\n' "$*" >> "$root/calls"
@@ -41,7 +46,9 @@ assert_failure() {
     if env -u WAYLAND_DISPLAY -u XDG_RUNTIME_DIR bash "$script"; then
         printf 'expected failure: %s\n' "$expected" >&2; exit 1
     fi
-    test "$(<"$root/clipboard")" = 'original URL'
+    cmp -s "$root/original" "$root/clipboard" || {
+        printf 'clipboard changed on failure: %s\n' "$expected" >&2; exit 1
+    }
     grep -q "notify ssbnk $expected" "$root/calls"
     if grep -q '^wl-copy' "$root/calls"; then
         printf 'unexpected clipboard mutation\n' >&2; exit 1
@@ -60,7 +67,7 @@ assert_failure 'Could not read text clipboard'
 rm "$root/fail-read"
 : > "$root/calls"
 env -u WAYLAND_DISPLAY -u XDG_RUNTIME_DIR bash "$script"
-test "$(<"$root/clipboard")" = 'original URL'
+cmp "$root/original" "$root/clipboard"
 grep -q '^wl-paste wayland-0 /run/user/' "$root/calls"
 grep -q '^wl-copy --type image/png$' "$root/calls"
 grep -q '^ydotool key 29:1 47:1 47:0 29:0$' "$root/calls"
@@ -74,5 +81,35 @@ touch "$root/fail-key"
 if bash "$script"; then
     printf 'expected key injection failure\n' >&2; exit 1
 fi
-test "$(<"$root/clipboard")" = 'original URL'
+cmp "$root/original" "$root/clipboard"
+rm "$root/fail-key"
+
+# Preserve exact bytes including multiple terminal newlines (and an empty body).
+for content in multiline empty; do
+    if [ "$content" = multiline ]; then
+        printf 'line1\nline2\n\n' > "$root/original"
+    else
+        : > "$root/original"
+    fi
+    cp "$root/original" "$root/clipboard"
+    : > "$root/calls"
+    bash "$script"
+    cmp "$root/original" "$root/clipboard" || {
+        printf 'lost clipboard bytes: %s\n' "$content" >&2; exit 1
+    }
+done
+
+# Image write succeeds, text restore fails: the script must report failure and
+# leave the image offered rather than claiming restoration.
+printf 'original URL\n\n' > "$root/original"
+cp "$root/original" "$root/clipboard"
+: > "$root/calls"
+touch "$root/fail-restore"
+if bash "$script" > "$root/stdout" 2> "$root/stderr"; then
+    printf 'expected text restoration failure\n' >&2; exit 1
+fi
+cmp "$root/hosted/shot.png" "$root/clipboard"
+grep -q '^notify ssbnk Could not restore text clipboard$' "$root/calls"
+grep -q '^ssbnk: Could not restore text clipboard$' "$root/stderr"
+rm "$root/fail-restore"
 printf 'paste-image shell contract passed\n'

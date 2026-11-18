@@ -1,5 +1,12 @@
 # Remote clipboard and paste-image verification
 
+**Current source guide:** This page describes the clipboard bridge and shortcut
+implemented on the SSBNK-1 branch. The checked-in `AGENTS.md` still describes
+an older direct-container clipboard path, legacy asset directory, and service
+names; that drift is pending approval to edit the protected file. Treat this
+page and the current source as the guide for this branch, not as proof that
+production is installed or behaving this way.
+
 This is an operator checklist, not a claim that a device has been tested. Coordinate
 before changing the running host, desktop, or either remote machine. Production
 Compose, service lifecycle, mounts, and secrets are owned by `~/docker`, not this
