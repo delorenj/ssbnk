@@ -48,21 +48,25 @@ export default function ScreenshotGallery() {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [copyStatus, setCopyStatus] = useState<{ message: string; error: boolean } | null>(null);
   const [copying, setCopying] = useState(false);
+  const copyInFlight = useRef(false);
   const copyGeneration = useRef(0);
   const limit = 48;
 
   function clearSelection() {
+    if (copyInFlight.current) return;
     copyGeneration.current += 1;
     setSelected(new Set());
     setCopyStatus(null);
   }
 
   function changePage(nextOffset: number) {
+    if (copyInFlight.current) return;
     clearSelection();
     setOffset(nextOffset);
   }
 
   function toggleSelection(filename: string) {
+    if (copyInFlight.current) return;
     copyGeneration.current += 1;
     setCopyStatus(null);
     setSelected((current) => {
@@ -82,7 +86,8 @@ export default function ScreenshotGallery() {
   );
 
   async function copySelection() {
-    if (!selectedUrls.length || copying) return;
+    if (!selectedUrls.length || copyInFlight.current) return;
+    copyInFlight.current = true;
     const generation = ++copyGeneration.current;
     setCopying(true);
     setCopyStatus(null);
@@ -97,6 +102,7 @@ export default function ScreenshotGallery() {
         setCopyStatus({ message: "Could not copy links. Check clipboard permission and try again.", error: true });
       }
     } finally {
+      copyInFlight.current = false;
       setCopying(false);
     }
   }
@@ -219,6 +225,7 @@ export default function ScreenshotGallery() {
                   type="checkbox"
                   aria-label={`Select ${s.filename}`}
                   checked={selected.has(s.filename)}
+                  disabled={copying}
                   onChange={() => toggleSelection(s.filename)}
                   className="h-5 w-5 accent-primary"
                 />
@@ -254,6 +261,7 @@ export default function ScreenshotGallery() {
                 type="checkbox"
                 aria-label={`Select ${s.filename}`}
                 checked={selected.has(s.filename)}
+                disabled={copying}
                 onChange={() => toggleSelection(s.filename)}
                 className="h-5 w-5 shrink-0 accent-primary"
               />
@@ -288,7 +296,7 @@ export default function ScreenshotGallery() {
         <div className="mt-8 flex justify-center gap-4">
           <button
             onClick={() => changePage(Math.max(0, offset - limit))}
-            disabled={offset === 0}
+            disabled={copying || offset === 0}
             className="rounded-md border px-4 py-2 text-sm transition-colors hover:bg-muted disabled:opacity-40"
           >
             Previous
@@ -298,7 +306,7 @@ export default function ScreenshotGallery() {
           </span>
           <button
             onClick={() => changePage(offset + limit)}
-            disabled={!hasMore}
+            disabled={copying || !hasMore}
             className="rounded-md border px-4 py-2 text-sm transition-colors hover:bg-muted disabled:opacity-40"
           >
             Next
