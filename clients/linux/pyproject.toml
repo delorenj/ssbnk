@@ -8,8 +8,12 @@ version = "0.1.0"
 requires-python = ">=3.12"
 description = "Durable SSBNK capture tray client"
 
+[project.optional-dependencies]
+fullpage = ["playwright>=1.40"]
+
 [project.scripts]
 ssbnk-client = "ssbnk_client.desktop:main"
+ssbnk-capture-fullpage = "ssbnk_client.capture_fullpage:main"
 
 [tool.setuptools.package-data]
 ssbnk_client = ["client1.xml"]
