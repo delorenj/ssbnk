@@ -35,9 +35,11 @@ def _marked_image(config: dict[str, str], directories: list[Path]) -> Path | Non
         return None
     if not marker:
         return None
-    if Path(marker).is_absolute():
-        return _image_path(Path(marker))
-    filename = Path(marker).name
+    marked_path = Path(marker)
+    if marked_path.is_absolute():
+        if image := _image_path(marked_path):
+            return image
+    filename = marked_path.name
     for directory in directories:
         if candidate := _image_path(directory / filename):
             return candidate
@@ -78,8 +80,13 @@ def _ledger_images() -> list[Path]:
             )
             for (raw_identity,) in rows:
                 try:
-                    raw_path = json.loads(raw_identity).get("path")
-                    if raw_path and (image := _image_path(Path(raw_path).expanduser())):
+                    identity = json.loads(raw_identity)
+                    if not isinstance(identity, dict):
+                        continue
+                    raw_path = identity.get("path")
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        continue
+                    if image := _image_path(Path(raw_path).expanduser()):
                         images.append(image)
                 except (TypeError, ValueError, OSError):
                     continue
@@ -96,6 +103,8 @@ def get_recent_screenshots(config: dict[str, str], count: int = 1) -> list[Path]
         raise ValueError("count must be positive")
     directories = _image_directories(config)
     marker = _marked_image(config, directories)
+    if marker and count == 1:
+        return [marker]
     directory_images = _directory_images(directories)
     results: list[Path] = []
     seen: set[Path] = set()

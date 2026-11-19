@@ -73,6 +73,53 @@ class TestSSBNKCLI(unittest.TestCase):
                         self.assertEqual(runner.invoke(app, args).stdout, str(marked.resolve()) + "\n")
                 copied.assert_called_with(str(marked.resolve()))
 
+    def test_missing_absolute_marker_uses_basename_before_newer_images(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            hosted = root / "hosted"
+            screenshots = root / "screenshots"
+            state = root / "state"
+            for directory in (hosted, screenshots, state):
+                directory.mkdir()
+            marked = hosted / "saved.png"
+            newer = screenshots / "newer.webp"
+            for image, mtime in ((marked, 100), (newer, 200)):
+                image.write_bytes(b"image")
+                os.utime(image, (mtime, mtime))
+            (state / "last-screenshot").write_text(str(root / "gone" / marked.name))
+            config = self._config(root, hosted=hosted, screenshots=screenshots, state=state)
+            with patch("ssbnk_cli.main.get_config_map", return_value=config), patch(
+                "ssbnk_cli.main.copy_to_wl_clipboard", return_value=(True, None)
+            ) as copied:
+                for args, expected in (
+                    (["get"], str(marked.resolve())),
+                    (["get", "1"], str(marked.resolve())),
+                    (["get", "2"], f"{marked.resolve()}\n{newer.resolve()}"),
+                ):
+                    with self.subTest(args=args):
+                        result = runner.invoke(app, args)
+                        self.assertEqual(result.exit_code, 0, result.output)
+                        self.assertEqual(result.stdout, expected + "\n")
+                        copied.assert_called_with(expected)
+                self.assertEqual(copied.call_count, 3)
+
+    def test_single_valid_marker_skips_directory_and_ledger_scans(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            state = root / "state"
+            state.mkdir()
+            marked = root / "saved.png"
+            marked.write_bytes(b"image")
+            (state / "last-screenshot").write_text(str(marked))
+            with patch("ssbnk_cli.main.get_config_map", return_value=self._config(root, state=state)), patch(
+                "ssbnk_cli.get._directory_images", side_effect=AssertionError("directory scan")
+            ), patch("ssbnk_cli.get._ledger_images", side_effect=AssertionError("ledger scan")):
+                for args in (["get", "--no-copy"], ["get", "1", "--no-copy"]):
+                    with self.subTest(args=args):
+                        result = runner.invoke(app, args)
+                        self.assertEqual(result.exit_code, 0, result.output)
+                        self.assertEqual(result.stdout, str(marked.resolve()) + "\n")
+
     def test_scan_ties_dedup_overlapping_dirs_and_filters_nonimages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -174,6 +221,36 @@ class TestSSBNKCLI(unittest.TestCase):
                 directory_image.write_bytes(b"image")
                 result = runner.invoke(app, ["get", "4", "--no-copy"])
                 self.assertEqual(result.stdout, str(directory_image.resolve()) + "\n")
+
+    def test_malformed_ledger_identities_do_not_hide_older_valid_images(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            ledger = root / ".local/state/ssbnk/ledger.db"
+            ledger.parent.mkdir(parents=True)
+            valid = root / "older.png"
+            valid.write_bytes(b"image")
+            conn = sqlite3.connect(ledger)
+            try:
+                conn.execute("CREATE TABLE captures (kind TEXT, capture_time TEXT, identity TEXT)")
+                for index, identity in enumerate((
+                    "[]", "null", "{", "42", '"text"',
+                    '{"path": []}', '{"path": 123}', '{"path": null}',
+                    json.dumps({"path": str(valid)}),
+                )):
+                    conn.execute(
+                        "INSERT INTO captures VALUES (?, ?, ?)",
+                        ("image", f"2026-06-{20 - index:02d}", identity),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+            with patch("ssbnk_cli.get.Path.home", return_value=root), patch(
+                "ssbnk_cli.main.get_config_map", return_value=self._config(root)
+            ), patch("ssbnk_cli.main.copy_to_wl_clipboard", return_value=(True, None)) as copied:
+                result = runner.invoke(app, ["get", "3"])
+                self.assertEqual(result.exit_code, 0, result.output)
+                self.assertEqual(result.stdout, str(valid.resolve()) + "\n")
+                copied.assert_called_once_with(str(valid.resolve()))
 
     def test_no_images_exits_one_without_clipboard(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
