@@ -1,10 +1,10 @@
 # shellcheck shell=bash
 # Ticket-provider adapter dispatcher — the single seam between the Scrum Master
-# sentinel engine and a concrete ticket system (Linear | Plane | Trello).
+# sentinel engine and a concrete ticket system (Plane | Trello).
 #
 # The engine NEVER calls a provider directly. It calls `tp <op> [args...]`,
 # which dispatches to providers/<provider>.sh. Repo-root .project.json owns the
-# provider/board binding; role.yaml is only a legacy provider-name fallback.
+# provider/board binding; role.yaml is not an authority for dispatch.
 #
 # Contract (operations every provider must implement):
 #   resolve                       -> JSON {provider, board_id, board_url}
@@ -38,6 +38,9 @@
 #                                    is In Progress + lifecycle:review and
 #                                    awaiting_decision is a hold:
 #                                    +lifecycle:needs-input, lane unchanged.
+#                                    (lifecycle:human is the owner's own hold:
+#                                    never written, and a label write onto a
+#                                    ticket carrying it is refused.)
 #   create_board <name> <id> <d>  -> JSON {board_id, board_url}
 #   describe_board <ws> <board_id>
 #                                 -> JSON {board_id, identifier, workspace,
@@ -121,50 +124,88 @@ $issues
 EOF
 }
 
-# Resolve the provider name: explicit env wins, then repo-root .project.json
-# (the SOT), then role.yaml (self-parsed so this works even when _lib.sh /
-# yaml_get is not loaded), then default.
+# Resolve the provider from the repo-root .project.json (the SOT). A provisioner
+# can supply a provider explicitly only when the manifest has no type yet.
+# No missing or malformed binding defaults to Plane.
 tp_provider_name() {
-  if [ -n "${TICKET_PROVIDER:-}" ]; then
-    printf '%s\n' "$TICKET_PROVIDER"
-    return 0
-  fi
   # .project.json ticket_provider.type — walk up from the role dir to repo root.
   local role_dir
   role_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
   if [ -n "$role_dir" ]; then
-    local sot_type
-    sot_type="$(python3 - "$role_dir" <<'PY' 2>/dev/null
+    python3 - "$role_dir" <<'PY' 2>/dev/null
 import sys, json, pathlib
 start = pathlib.Path(sys.argv[1]).resolve()
 for parent in [start, *start.parents]:
     f = parent / ".project.json"
     if f.is_file():
         try:
-            print((json.loads(f.read_text()).get("ticket_provider") or {}).get("type", ""))
+            value = json.loads(f.read_text())
+            if not isinstance(value, dict):
+                print("__TP_INVALID_MANIFEST__")
+            else:
+                binding = value.get("ticket_provider", {})
+                if not isinstance(binding, dict):
+                    print("__TP_INVALID_MANIFEST__")
+                elif "type" not in binding or binding["type"] == "":
+                    board = binding.get("board_id", "")
+                    if not isinstance(board, str) or board.strip():
+                        print("__TP_UNTYPED_BOUND__")
+                    else:
+                        print("__TP_ABSENT_BINDING__")
+                else:
+                    print(binding["type"] if isinstance(binding["type"], str) else "__TP_INVALID_MANIFEST__")
+        except Exception:
+            print("__TP_INVALID_MANIFEST__")
+        break
+else:
+    print("__TP_NO_MANIFEST__")
+PY
+  fi
+}
+
+# A canonical manifest with no board must not fall through to a stale role.yaml
+# board. Only board creation and explicit board lookup can run without one.
+tp_board_id() {
+  local role_dir
+  role_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
+  python3 - "$role_dir" <<'PY' 2>/dev/null
+import json, pathlib, sys
+start = pathlib.Path(sys.argv[1]).resolve()
+for parent in [start, *start.parents]:
+    f = parent / ".project.json"
+    if f.is_file():
+        try:
+            binding = json.loads(f.read_text()).get("ticket_provider")
+            print(binding.get("board_id") if isinstance(binding, dict) and isinstance(binding.get("board_id"), str) else "")
         except Exception:
             print("")
         break
+else:
+    print("")
 PY
-)"
-    [ -n "$sot_type" ] && { printf '%s\n' "$sot_type"; return 0; }
-  fi
-  local role_yaml
-  role_yaml="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)/role.yaml"
-  if [ -f "$role_yaml" ]; then
-    local name
-    name="$(python3 - "$role_yaml" <<'PY'
-import re, sys, pathlib
-t = pathlib.Path(sys.argv[1]).read_text()
-m = re.search(r'(?ms)^ticket_provider:\s*$(.*?)(?=^\S)', t + "\n\x00")
-block = m.group(1) if m else ""
-mm = re.search(r'(?m)^\s*name:\s*"?([^"\n]*)"?\s*$', block)
-print(mm.group(1).strip() if mm else "")
+}
+
+# Read canonical Plane workspace without consulting role.yaml or ambient env.
+# An empty canonical workspace cannot authorize a board-bound Plane request.
+tp_plane_workspace() {
+  local role_dir
+  role_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
+  python3 - "$role_dir" <<'PY' 2>/dev/null
+import json, pathlib, sys
+start = pathlib.Path(sys.argv[1]).resolve()
+for parent in [start, *start.parents]:
+    f = parent / ".project.json"
+    if f.is_file():
+        try:
+            binding = json.loads(f.read_text()).get("ticket_provider")
+            workspace = binding.get("workspace") if isinstance(binding, dict) else None
+            print(workspace.strip() if isinstance(workspace, str) else "")
+        except Exception:
+            print("")
+        break
+else:
+    print("")
 PY
-)"
-    [ -n "$name" ] && { printf '%s\n' "$name"; return 0; }
-  fi
-  printf 'linear\n'
 }
 
 # Directory holding provider implementations (sibling of this lib).
@@ -207,12 +248,45 @@ tp() {
 
   local name impl
   name="$(tp_provider_name)"
+  case "$name" in
+    __TP_NO_MANIFEST__|__TP_ABSENT_BINDING__|"")
+      if [ "${TP_PROVISIONING:-0}" = "1" ]; then name="${TICKET_PROVIDER:-}"; else name=""; fi
+      ;;
+    __TP_INVALID_MANIFEST__|__TP_UNTYPED_BOUND__)
+      echo "tp: unsupported ticket provider binding in .project.json; supported: plane, trello" >&2
+      return 2
+      ;;
+    *)
+      if [ -n "${TICKET_PROVIDER:-}" ] && [ "$TICKET_PROVIDER" != "$name" ]; then
+        echo "tp: explicit provider conflicts with .project.json ticket_provider.type" >&2
+        return 2
+      fi
+      ;;
+  esac
+  case "$name" in
+    plane|trello) ;;
+    *) echo "tp: unsupported ticket provider '$name' (supported: plane, trello)" >&2; return 2 ;;
+  esac
   impl="$(tp_providers_dir)/${name}.sh"
 
   if [ ! -f "$impl" ]; then
     echo "tp: unknown ticket provider '$name' (no $impl)" >&2
     return 2
   fi
+
+  case "$op" in
+    create_board|describe_board) ;;
+    *)
+      if [ -z "$(tp_board_id)" ]; then
+        echo "tp: .project.json ticket_provider.board_id is missing; refusing board-bound $op" >&2
+        return 2
+      fi
+      if [ "$name" = plane ] && [ -z "$(tp_plane_workspace)" ]; then
+        echo "tp: .project.json ticket_provider.workspace is missing; refusing board-bound $op" >&2
+        return 2
+      fi
+      ;;
+  esac
 
   case "$op" in
     get_issue|comment|transition)
@@ -232,7 +306,8 @@ tp() {
 # v2 (krebs/spec/lifecycle.v2.yaml): five stock lanes, with review and holds
 # carried by labels, so plane.sh lands in_review in In Progress plus
 # lifecycle:review and awaiting_decision as +lifecycle:needs-input in place.
-# Linear and Trello still map both to a lane role.yaml names.
+# lifecycle:human is the owner's hold: agents never add, remove or work it.
+# Trello maps both to lanes named in role.yaml.
 TP_STATES="backlog unstarted started in_review completed cancelled awaiting_decision needs_attention waiting_reply"
 
 tp_is_valid_state() {

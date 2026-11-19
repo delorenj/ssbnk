@@ -8,9 +8,9 @@
 #   workspace: <workspace-slug>      (or env PLANE_WORKSPACE)
 #   board_id:  <project-uuid>        (set by create_board / 42-ticket-provider)
 #   timezone:  <IANA timezone>       optional project calendar override
-# Lane names (role.yaml `ticket_provider:`, each optional): backlog, unstarted,
-#   started, completed (default "Done"), cancelled (default "Cancelled"). An
-#   unnamed lane resolves only when its state group has exactly one member.
+# Lane names: .project.json ticket_provider.state_map overrides legacy role.yaml
+# ticket_provider keys; canonical defaults are Backlog, Todo, In Progress, Done,
+# Cancelled. Configured names must resolve uniquely within their state group.
 #
 # Krebs lifecycle v2 (krebs/spec/lifecycle.v2.yaml): every board has the five
 # stock lanes (Backlog, Todo, In Progress, Done, Cancelled); what the retired
@@ -21,8 +21,11 @@
 #                      Todo or In Progress ticket only (krebs tick is the one
 #                      thing that moves Todo -> In Progress). Aliases:
 #                      needs_attention, waiting_reply.
+# A third hold, lifecycle:human, is the owner's own and is never written here.
 # The labels must already exist on the board (every board carries all six);
-# they are never created here. Every other target is a plain lane move, and
+# they are never created here. (lifecycle:human is the owner's hold label: this
+# adapter never adds or removes it, and refuses a label write onto a ticket that
+# carries it.) Every other target is a plain lane move, and
 # krebs tick strips a lifecycle:review left outside In Progress.
 #
 # Rate limiting: reads retry HTTP 429 up to PLANE_READ_MAX_ATTEMPTS (default 4)
@@ -31,8 +34,11 @@
 # transition sends at most ONE PATCH: without a version/precondition guard a
 # repeated PATCH can stomp a concurrent actor, so the live read-back after the
 # single attempt is the only success proof. PLANE_MAX_PAGES bounds every
-# paginated collection (default 1000). All numeric overrides are validated
-# before any request.
+# paginated collection (default 1000). Every request is bounded: it gives up
+# connecting after PLANE_CONNECT_TIMEOUT (default 10s) and in total after
+# PLANE_MAX_TIME (default 60s), so a half-open Plane connection fails the
+# caller instead of hanging a hire forever. All numeric overrides are
+# validated before any request.
 #
 # Plane model:  project = board, cycle = milestone, state.group in
 #   backlog|unstarted|started|completed|cancelled.
@@ -45,24 +51,6 @@ OP="${1:-}"; shift 2>/dev/null || true
 ROLE_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 ROLE_YAML="$ROLE_DIR/role.yaml"
 BASE="${PLANE_BASE:-https://plane.delo.sh}"
-
-# Managed/shadow execution owns every mutation; stop before credential fallback.
-EXECUTION_MODE="$(python3 - "$ROLE_DIR" <<'PYMODE'
-import json, pathlib, sys
-for parent in [pathlib.Path(sys.argv[1]), *pathlib.Path(sys.argv[1]).parents]:
-    path=parent/'.project.json'
-    if path.exists():
-        print(json.loads(path.read_text()).get('execution',{}).get('mode','legacy')); break
-PYMODE
-)"
-case "$EXECUTION_MODE" in
-  managed|shadow)
-    case "$OP" in
-      resolve|describe_board|list_issues|list_states|list_labels|active_milestone|get_issue) ;;
-      *) echo "plane: $EXECUTION_MODE lifecycle writes require px task through Krebs" >&2; exit 78 ;;
-    esac ;;
-esac
-
 
 FLEET_ENV="${HERMES_FLEET_ENV:-$HOME/.hermes/fleet.env}"
 
@@ -128,11 +116,63 @@ tp_cfg() {
   [ -f "$ROLE_YAML" ] || return 0
   python3 - "$ROLE_YAML" "$1" <<'PY'
 import sys, re, pathlib
-text = pathlib.Path(sys.argv[1]).read_text()
-m = re.search(r'(?ms)^ticket_provider:\s*$(.*?)(?=^\S)', text + "\n\x00")
-block = m.group(1) if m else ""
-mm = re.search(rf'(?m)^\s*{re.escape(sys.argv[2])}:\s*"?([^"\n]*)"?\s*$', block)
-print(mm.group(1).strip() if mm else "")
+
+# role.yaml uses single-line scalar fields here. Decode YAML quotes/escapes
+# without requiring PyYAML in every deployed employee's Python environment.
+def scalar(raw):
+    raw = raw.strip()
+    if not raw or raw.startswith("#"):
+        return ""
+    quote = raw[0]
+    if quote not in "\"'":
+        if raw[0] in "[{}]&*!>|":
+            raise ValueError("expected a single-line scalar")
+        return re.split(r"\s+#", raw, maxsplit=1)[0].rstrip()
+    out = []; i = 1
+    escapes = {"0": "\0", "a": "\a", "b": "\b", "t": "\t", "n": "\n", "v": "\v",
+               "f": "\f", "r": "\r", "e": "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\",
+               "N": "\x85", "_": "\xa0", "L": "\u2028", "P": "\u2029"}
+    while i < len(raw):
+        ch = raw[i]; i += 1
+        if ch == quote:
+            if quote == "'" and i < len(raw) and raw[i] == "'":
+                out.append("'"); i += 1; continue
+            rest = raw[i:]
+            if rest and not re.fullmatch(r"\s+(?:#.*)?", rest):
+                raise ValueError("unexpected text after quoted scalar")
+            return "".join(out)
+        if quote == '"' and ch == "\\":
+            if i == len(raw):
+                raise ValueError("unfinished escape")
+            esc = raw[i]; i += 1
+            if esc in escapes:
+                ch = escapes[esc]
+            elif esc in "xuU":
+                width = {"x": 2, "u": 4, "U": 8}[esc]
+                digits = raw[i:i + width]
+                if len(digits) != width or not re.fullmatch(r"[0-9a-fA-F]+", digits):
+                    raise ValueError("invalid Unicode escape")
+                ch = chr(int(digits, 16)); i += width
+            else:
+                raise ValueError(f"unsupported escape \\{esc}")
+        out.append(ch)
+    raise ValueError("unterminated quoted scalar")
+
+key = sys.argv[2]; active = False
+try:
+    for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
+        if re.fullmatch(r"ticket_provider:\s*(?:#.*)?", line):
+            active = True; continue
+        if active and line and not line[0].isspace() and not line.startswith("#"):
+            break
+        if active:
+            match = re.fullmatch(rf"[ \t]+{re.escape(key)}:[ \t]*(.*)", line)
+            if match:
+                print(scalar(match.group(1)).strip()); break
+    else:
+        print("")
+except (ValueError, OSError) as exc:
+    raise SystemExit(f"plane: invalid role.yaml ticket_provider.{key}: {exc}")
 PY
 }
 
@@ -154,16 +194,56 @@ else:
 PY
 }
 
+# pj_state_map KEY — optional repo-wide name override for a normalized lane.
+# Reject malformed configured maps instead of silently falling back to a role.
+pj_state_map() {
+  python3 - "$ROLE_DIR" "$1" <<'PY'
+import sys, json, pathlib
+start = pathlib.Path(sys.argv[1]).resolve(); key = sys.argv[2]
+for parent in [start, *start.parents]:
+    f = parent / ".project.json"
+    if f.is_file():
+        try:
+            tp = json.loads(f.read_text()).get("ticket_provider") or {}
+            mapping = tp.get("state_map", {}) if isinstance(tp, dict) else {}
+            if not isinstance(mapping, dict):
+                raise ValueError("state_map must be an object")
+            allowed = {"backlog", "unstarted", "started", "completed", "cancelled"}
+            unknown = sorted(set(mapping) - allowed)
+            if unknown:
+                raise ValueError(f"unsupported state_map keys: {', '.join(unknown)}")
+            for lane, configured in mapping.items():
+                if not isinstance(configured, str):
+                    raise ValueError(f"state_map.{lane} must be a string")
+            value = mapping.get(key, "")
+            print(value.strip())
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"plane: invalid .project.json ticket_provider.state_map: {exc}")
+        break
+else:
+    print("")
+PY
+}
+
 # Board binding: .project.json (SOT) first, then legacy role.yaml, then env.
 WS="$(pj_cfg workspace)"; [ -n "$WS" ] || WS="$(tp_cfg workspace)"; WS="${WS:-${PLANE_WORKSPACE:-}}"
 PROJ="$(pj_cfg board_id)"; [ -n "$PROJ" ] || PROJ="$(tp_cfg project)"; [ -n "$PROJ" ] || PROJ="$(tp_cfg board_id)"
-SM_DONE="$(tp_cfg completed)"; SM_DONE="${SM_DONE:-Done}"
-SM_CANCELLED="$(tp_cfg cancelled)"; SM_CANCELLED="${SM_CANCELLED:-Cancelled}"
-SM_STARTED="$(tp_cfg started)"
-SM_UNSTARTED="$(tp_cfg unstarted)"
-SM_BACKLOG="$(tp_cfg backlog)"
+# Read all five overrides before any API call, propagating invalid config errors.
+MAP_DONE="$(pj_state_map completed)" || exit 1
+MAP_CANCELLED="$(pj_state_map cancelled)" || exit 1
+MAP_STARTED="$(pj_state_map started)" || exit 1
+MAP_UNSTARTED="$(pj_state_map unstarted)" || exit 1
+MAP_BACKLOG="$(pj_state_map backlog)" || exit 1
+SM_DONE="${MAP_DONE:-$(tp_cfg completed)}"; SM_DONE="${SM_DONE:-Done}"
+SM_CANCELLED="${MAP_CANCELLED:-$(tp_cfg cancelled)}"; SM_CANCELLED="${SM_CANCELLED:-Cancelled}"
+SM_STARTED="${MAP_STARTED:-$(tp_cfg started)}"; SM_STARTED="${SM_STARTED:-In Progress}"
+SM_UNSTARTED="${MAP_UNSTARTED:-$(tp_cfg unstarted)}"; SM_UNSTARTED="${SM_UNSTARTED:-Todo}"
+SM_BACKLOG="${MAP_BACKLOG:-$(tp_cfg backlog)}"; SM_BACKLOG="${SM_BACKLOG:-Backlog}"
 LABEL_REVIEW="lifecycle:review"
 LABEL_NEEDS_INPUT="lifecycle:needs-input"
+# Owner-applied hold: Jarad took the ticket by hand. Never written here; a transition that
+# writes a label onto a ticket carrying it is refused (agents never work a lifecycle:human ticket).
+LABEL_HUMAN="lifecycle:human"
 CALENDAR_TZ="$(pj_cfg timezone)"; [ -n "$CALENDAR_TZ" ] || CALENDAR_TZ="$(tp_cfg timezone)"
 CALENDAR_TZ="${CALENDAR_TZ:-${TICKET_PROVIDER_TIMEZONE:-${TZ:-}}}"
 API="$BASE/api/v1/workspaces/$WS"
@@ -172,6 +252,8 @@ READ_MAX_ATTEMPTS="$(validated_uint PLANE_READ_MAX_ATTEMPTS "${PLANE_READ_MAX_AT
 RETRY_DEFAULT_DELAY="$(validated_uint PLANE_429_RETRY_DELAY "${PLANE_429_RETRY_DELAY:-1}" 0 3600)"
 RETRY_MAX_DELAY="$(validated_uint PLANE_429_MAX_DELAY "${PLANE_429_MAX_DELAY:-30}" 0 3600)"
 MAX_PAGES="$(validated_uint PLANE_MAX_PAGES "${PLANE_MAX_PAGES:-1000}" 1 1000)"
+CONNECT_TIMEOUT="$(validated_uint PLANE_CONNECT_TIMEOUT "${PLANE_CONNECT_TIMEOUT:-10}" 1 300)"
+MAX_TIME="$(validated_uint PLANE_MAX_TIME "${PLANE_MAX_TIME:-60}" 1 3600)"
 
 if [ -z "${PLANE_API_KEY:-}" ]; then
   KEY="$(workspace_key "$WS")"
@@ -212,12 +294,12 @@ api() {
     : > "$headers_file"
     curl_exit=0
     if [ -n "$body" ]; then
-      captured="$(curl -sS -o "$response_file" -D "$headers_file" -w '%{http_code}' -X "$method" "$API/$path" \
+      captured="$(curl -sS --connect-timeout "$CONNECT_TIMEOUT" --max-time "$MAX_TIME" -o "$response_file" -D "$headers_file" -w '%{http_code}' -X "$method" "$API/$path" \
         -H "X-API-Key: $PLANE_API_KEY" -H "Content-Type: application/json" \
         -H "User-Agent: curl/8.0" \
         -d "$body")" || curl_exit=$?
     else
-      captured="$(curl -sS -o "$response_file" -D "$headers_file" -w '%{http_code}' -X "$method" "$API/$path" \
+      captured="$(curl -sS --connect-timeout "$CONNECT_TIMEOUT" --max-time "$MAX_TIME" -o "$response_file" -D "$headers_file" -w '%{http_code}' -X "$method" "$API/$path" \
         -H "X-API-Key: $PLANE_API_KEY" \
         -H "User-Agent: curl/8.0")" || curl_exit=$?
     fi
@@ -704,12 +786,20 @@ print(comment_id.strip())'
     if [ -z "$LABEL" ]; then
       BODY="$(printf '{"state":"%s"}' "$SID")"
     else
-      LABEL_ID="$(api_all "projects/$PROJ/labels/" | pick_label "$LABEL")"
+      LABELS_JSON="$(api_all "projects/$PROJ/labels/")"
+      LABEL_ID="$(printf '%s' "$LABELS_JSON" | pick_label "$LABEL")"
+      # Tolerant on purpose: a board that has no lifecycle:human label yet cannot have a human-held ticket.
+      HUMAN_ID="$(printf '%s' "$LABELS_JSON" | LABEL_NAME="$LABEL_HUMAN" python3 -c 'import sys,json,os
+try:
+    d=json.load(sys.stdin); rows=d if isinstance(d,list) else d.get("results", []) if isinstance(d,dict) else []
+    print(next((str(x["id"]) for x in rows if isinstance(x,dict) and x.get("id") and x.get("name")==os.environ["LABEL_NAME"]), ""))
+except Exception:
+    print("")')"
       # Plane's issue PATCH replaces the whole labels list, so the issue is
       # read immediately before the write and only this label is added to that
       # fresh set: agent:working and lifecycle:triaged written by others survive.
       FRESH="$(api GET "projects/$PROJ/issues/$ID/")"
-      PLAN="$(printf '%s\0%s' "$FRESH" "$STATES" | EXPECTED_ID="$ID" SID="$SID" LABEL_ID="$LABEL_ID" TARGET="$TARGET" python3 -c 'import json,os,sys
+      PLAN="$(printf '%s\0%s' "$FRESH" "$STATES" | EXPECTED_ID="$ID" SID="$SID" LABEL_ID="$LABEL_ID" HUMAN_ID="$HUMAN_ID" TARGET="$TARGET" python3 -c 'import json,os,sys
 parts=sys.stdin.buffer.read().split(b"\0",1)
 target=os.environ["TARGET"]; sid=os.environ["SID"]; label_id=os.environ["LABEL_ID"]
 try:
@@ -731,6 +821,8 @@ ids=[]
 for item in raw:
     ident=str(item.get("id") or "") if isinstance(item,dict) else str(item)
     if ident and ident not in ids: ids.append(ident)
+if os.environ["HUMAN_ID"] and os.environ["HUMAN_ID"] in ids:
+    raise SystemExit("plane: this ticket is held by the owner (lifecycle:human); only the owner removes it; nothing was written")
 body={}
 if sid: body["state"]=sid
 if label_id not in ids: body["labels"]=ids+[label_id]
@@ -825,7 +917,7 @@ else:
     [ -n "$DKEY" ] || DKEY="${PLANE_API_KEY:-}"
     DKEY="$(resolve_secret_value "$DKEY")"
     [ -n "$DKEY" ] || die "no Plane API key for workspace '$DWS' (looked for $DKEYVAR)"
-    DETAIL="$(curl -fsS "$BASE/api/v1/workspaces/$DWS/projects/$DBID/" \
+    DETAIL="$(curl -fsS --connect-timeout "$CONNECT_TIMEOUT" --max-time "$MAX_TIME" "$BASE/api/v1/workspaces/$DWS/projects/$DBID/" \
       -H "X-API-Key: $DKEY" -H "User-Agent: curl/8.0")" \
       || die "describe_board failed for $DWS/$DBID"
     printf '%s' "$DETAIL" | WS="$DWS" BID="$DBID" python3 -c 'import sys, json, os

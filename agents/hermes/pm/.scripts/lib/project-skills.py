@@ -314,6 +314,10 @@ def command(args, renderer, policy):
     rows = targets(args, renderer, policy)
     if not rows:
         raise RuntimeError("no registered PM profiles found")
+    # Validate every registered desk before runtime probes, locks, or writes.
+    # Batch selection is atomic with respect to invalid profile entries.
+    for _, row in rows:
+        renderer.validate_profile(row.get("profile_name"))
     adapter = ProfileSkillsRuntime()
     try:
         runtime = adapter.inspect(renderer)

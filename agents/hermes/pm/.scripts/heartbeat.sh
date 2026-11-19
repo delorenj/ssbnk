@@ -10,7 +10,7 @@
 # reconciliation pass when local state says no worker is active, the worker
 # heartbeat is stale, or the last full run is outside the cooldown window. The
 # full pass executes the role's sentinel.prompt.md, which reasons about tickets
-# through the ticket-provider adapter (Linear | Plane | Trello) — never a
+# through the ticket-provider adapter (Plane | Trello) — never a
 # hardcoded backend. After the sentinel decision (skip OR full), it
 #
 # KREBS LIFECYCLE v2 (2026-11-14): this script and the pass it launches NEVER dispatch
@@ -115,11 +115,6 @@ repo_root() {
 }
 REPO_ROOT="$(repo_root)"
 cd "$REPO_ROOT"
-# A repo with no .project.json has no Krebs execution mode: it is legacy.
-EXECUTION_MODE="$(python3 -c 'import json,pathlib,sys; p=pathlib.Path(sys.argv[1]); print((json.loads(p.read_text()) if p.is_file() else {}).get("execution",{}).get("mode","legacy"))' "$REPO_ROOT/.project.json")"
-if [[ "$EXECUTION_MODE" == managed || "$EXECUTION_MODE" == shadow ]]; then
-  KREBS_PLANNER_ENABLED="$(reconcile_enabled)" exec python3 "$ROLE_DIR/.scripts/managed-execution.py" "$REPO_ROOT"
-fi
 
 mkdir -p "$RUNTIME/logs"
 

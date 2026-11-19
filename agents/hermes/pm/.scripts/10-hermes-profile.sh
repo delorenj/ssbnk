@@ -29,10 +29,22 @@ PROFILE_DELTA_SEEDER="$ROLE_DIR/.scripts/lib/profile-config-seed.py"
 already_done 10-hermes-profile \
   && log "[10] profile marker found — revalidating required profile contract"
 
-# Canonical project identity and the desk's strict loadout are separate inputs.
-PROJECT_PATH="$(project_repo_path)" \
-  || die "cannot resolve the owning project; set PJANGLER_PROJECT_ROOT explicitly"
-SKILLEX_PROJECT_PATH="$PROJECT_PATH"
+# An explicit desk owns a loadout, not a fabricated project. Project-backed
+# roles retain their canonical resolver and project-discovery policy.
+PROJECT_PATH=""
+DESK_ONLY=0
+SKILLS_POLICY_ARGS=()
+if [[ -n "${HERMES_DESK_ROOT:-}" ]]; then
+  SKILLEX_PROJECT_PATH="$(owning_desk_path)" \
+    || die "cannot resolve the owning desk; use its real role directory and no PJANGLER_PROJECT_ROOT"
+  DESK_ONLY=1
+  SKILLS_POLICY_ARGS=(--desk-only)
+else
+  PROJECT_PATH="$(project_repo_path)" \
+    || die "cannot resolve the owning project; set PJANGLER_PROJECT_ROOT or HERMES_DESK_ROOT explicitly"
+  SKILLEX_PROJECT_PATH="$PROJECT_PATH"
+fi
+SELECTION_ROOT="$SKILLEX_PROJECT_PATH"
 if [[ -e "$PROFILE_HOME/.skillex-selection" || -L "$PROFILE_HOME/.skillex-selection" ]]; then
   [[ -d "$PROFILE_HOME/.skillex-selection" && ! -L "$PROFILE_HOME/.skillex-selection" ]] \
     || die "role selection must be a real directory: $PROFILE_HOME/.skillex-selection"
@@ -63,6 +75,21 @@ export PJ_SKILLS_REGISTRY_ROOT
 PROFILE_RENDERER="${PROFILE_RENDERER:-$HERMES_TEMPLATE_REPO/scripts/hermes-profile-config.py}"
 CUTOVER_HINT="python3 $PJ_SKILLS_REGISTRY_ROOT/scripts/hermes-skillex-cutover.py --profile $PROFILE_NAME --project '$PROJECT_PATH' --registry-root $PJ_SKILLS_REGISTRY_ROOT --renderer $HERMES_TEMPLATE_REPO/scripts/hermes-profile-config.py (preview, then --apply)"
 
+# Only the effective desk selection is an authored input: persisted role
+# selection and receipt bindings take precedence over the desk's initial one.
+# Validate path components, not skill targets (canonical skill links are valid).
+desk_selection_preflight() {
+  [[ "$DESK_ONLY" == "1" ]] || return 0
+  python3 -I - "$SKILLEX_PROJECT_PATH/.agents/skills.json" <<'PYEOF'
+import pathlib, sys
+source = pathlib.Path(sys.argv[1]).absolute()
+if any(parent.is_symlink() or not parent.is_dir() for parent in source.parents):
+    raise SystemExit(f"desk selection must have real directory ancestors: {source}")
+if source.is_symlink() or not source.is_file():
+    raise SystemExit(f"desk selection must be a regular file: {source}")
+PYEOF
+}
+
 # Read-only Skillex preflight of an existing profile. Exit 0 is converged and
 # exit 6 is a pending sync (a selection change or catalog bump), which is what
 # this step exists to apply. Anything else (a refusal, an invalid manifest, a
@@ -78,7 +105,7 @@ skillex_preflight() {
     die "legacy/invalid skills (skillex profile show exit $rc); use the preservation-first Skillex cutover: $CUTOVER_HINT"
   fi
   if [[ -z "$SKILLEX_PROJECT_PATH" ]]; then
-    SKILLEX_PROJECT_PATH="$(python3 -I - "$SKILLEX_SHOW_JSON" "$PROJECT_PATH" <<'PYEOF'
+    SKILLEX_PROJECT_PATH="$(python3 -I - "$SKILLEX_SHOW_JSON" "$SELECTION_ROOT" <<'PYEOF'
 import json, sys
 data = (json.loads(sys.argv[1]) or {}).get("data") or {}
 project = data.get("project")
@@ -87,6 +114,7 @@ if project is not None and (not isinstance(project, str) or not project.strip())
 print(project or sys.argv[2])
 PYEOF
     )" || die "cannot read the recorded Skillex selection project"
+    desk_selection_preflight || die "unsafe desk selection; no profile state changed"
     [[ -f "$SKILLEX_PROJECT_PATH/.agents/skills.json" ]] \
       || die "project selection is missing: $SKILLEX_PROJECT_PATH/.agents/skills.json; run skillex init --project '$SKILLEX_PROJECT_PATH'"
     # A receipt-less desk's first preview may have used the ambient cwd.
@@ -100,7 +128,7 @@ PYEOF
   fi
 }
 
-# Strict sync: preview first, then apply. Both refuse foreign skills/ content
+# Strict sync: preview first, then apply. Both refuse skill ownership conflicts
 # and non-empty skills.external_dirs without changing anything.
 strict_skill_sync() {
   [[ -f "$SKILLEX_PROJECT_PATH/.agents/skills.json" ]] \
@@ -114,6 +142,10 @@ strict_skill_sync() {
 # A runtime blocker applies only to the extra project binding. Strict desk
 # provisioning continues, and every rerun reassesses the actual fleet pin.
 project_skills_policy() {
+  if [[ "$DESK_ONLY" == "1" ]]; then
+    log "[10] desk-only loadout — no project discovery binding"
+    return 0
+  fi
   local rc=0 message
   message="$(python3 -I "$PROFILE_RENDERER" project-skills --profile "$PROFILE_NAME" \
     --project-root "$PROJECT_PATH" --role-dir "$ROLE_DIR")" || rc=$?
@@ -125,6 +157,17 @@ project_skills_policy() {
     log "$message"
   fi
 }
+
+# Validate the declared identity before creating or changing a profile. Reuse
+# this answer when pinning memory below; the role reader owns its semantics.
+ROLE_IDENTITY_READER="$ROLE_DIR/.scripts/lib/role-identity.py"
+[[ -f "$ROLE_IDENTITY_READER" && ! -L "$ROLE_IDENTITY_READER" ]] \
+  || die "trusted role identity reader is unavailable: $ROLE_IDENTITY_READER"
+ROLE_IDENTITY_JSON="$(python3 -I "$ROLE_IDENTITY_READER" "$ROLE_YAML" "$AGENT_ID" "$PROFILE_NAME")" \
+  || die "role.yaml identity block is invalid"
+if [[ -n "$SKILLEX_PROJECT_PATH" ]]; then
+  desk_selection_preflight || die "unsafe desk selection; no profile state changed"
+fi
 
 log "[10] creating hermes profile: $PROFILE_NAME"
 
@@ -201,6 +244,20 @@ PYEOF
   [[ -L "$PROFILE_ENV" ]] || chmod 600 "$PROFILE_ENV"
 fi
 
+# The multiplexed gateway fires a turn's hooks on the routed profile's own
+# plugin manager, so the Bloodbank final-answer observer must load in this
+# profile, not only in the launch home. Without this link every Bloodbank
+# command for the desk is rejected ("resolved profile lacks the final-answer
+# observer", BB-43). Harmless when the plugin is not enabled. Takes effect on
+# the next gateway restart.
+BB_PLUGIN_SRC="$HOME/.hermes/plugins/bloodbank-platform"
+BB_PLUGIN_DEST="$PROFILE_HOME/plugins/bloodbank-platform"
+if [[ -L "$BB_PLUGIN_SRC" && ! -e "$BB_PLUGIN_DEST" ]]; then
+  mkdir -p "$PROFILE_HOME/plugins"
+  ln -s "$(readlink -f "$BB_PLUGIN_SRC")" "$BB_PLUGIN_DEST"
+  log "    linked bloodbank-platform plugin into the profile (restart the gateway to load it)"
+fi
+
 # An established Skillex-only desk is converged in place: keep discovery
 # isolated (a no-op when the delta already says so), then apply any pending
 # selection or catalog change. Its config, SOUL, memory pin and runtime state
@@ -208,7 +265,7 @@ fi
 if [[ "$STRICT_DESK" == "1" ]]; then
   [[ -f "$PROFILE_RENDERER" && ! -L "$PROFILE_RENDERER" ]] \
     || die "canonical config renderer required for PM skill policy: $PROFILE_RENDERER"
-  python3 -I "$PROFILE_RENDERER" skills-policy --profile "$PROFILE_NAME" \
+  python3 -I "$PROFILE_RENDERER" skills-policy --profile "$PROFILE_NAME" "${SKILLS_POLICY_ARGS[@]}" \
     || die "could not keep isolated PM discovery"
   project_skills_policy
   strict_skill_sync
@@ -255,12 +312,8 @@ mkdir -p "$(dirname "$PROFILE_MEM_CFG")"
 # its durable personal bank follows the name, never the post/profile. role.yaml
 # is the source; 80-registry.sh projects it into the registry. This step runs
 # BEFORE step 80, so it reads role.yaml first and only falls back to a registry
-# declaration for rows named before role.yaml carried the block.
-ROLE_IDENTITY_READER="$ROLE_DIR/.scripts/lib/role-identity.py"
-[[ -f "$ROLE_IDENTITY_READER" && ! -L "$ROLE_IDENTITY_READER" ]] \
-  || die "trusted role identity reader is unavailable: $ROLE_IDENTITY_READER"
-ROLE_IDENTITY_JSON="$(python3 -I "$ROLE_IDENTITY_READER" "$ROLE_YAML" "$AGENT_ID" "$PROFILE_NAME")" \
-  || die "role.yaml identity block is invalid"
+# declaration for rows named before role.yaml carried the block. The role's
+# identity was already validated before profile mutation above.
 DECLARED_PERSONAL_BANK="$(python3 - "$REGISTRY_FILE" "$AGENT_ID" "$ROLE_IDENTITY_JSON" <<'PYEOF'
 import json
 import pathlib
@@ -353,7 +406,7 @@ fi
 # then Skillex publishes the strict markers with the first strict sync.
 [[ -f "$PROFILE_RENDERER" && ! -L "$PROFILE_RENDERER" ]] \
   || die "canonical config renderer required for PM skill policy: $PROFILE_RENDERER"
-python3 -I "$PROFILE_RENDERER" skills-policy --profile "$PROFILE_NAME" \
+python3 -I "$PROFILE_RENDERER" skills-policy --profile "$PROFILE_NAME" "${SKILLS_POLICY_ARGS[@]}" \
   || die "could not establish isolated PM discovery"
 project_skills_policy
 strict_skill_sync

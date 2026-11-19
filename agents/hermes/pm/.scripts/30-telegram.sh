@@ -221,7 +221,8 @@ log "    verifying token..."
 # complete request description from an anonymous stdin pipe.
 info="$({
   printf 'url = "https://api.telegram.org/bot%s/getMe"\n' "$TELEGRAM_BOT_TOKEN"
-  printf '%s\n' 'fail' 'silent' 'show-error'
+  printf '%s\n' 'fail' 'silent' 'show-error' \
+    'connect-timeout = 10' 'max-time = 20' 'max-filesize = 1048576'
 } | curl --config -)" \
   || die "Telegram getMe request failed"
 identity=$(printf '%s' "$info" | python3 -c '

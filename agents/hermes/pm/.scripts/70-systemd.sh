@@ -326,9 +326,9 @@ retire_agent_gateway_unit
 #   liveness    -> the host gateway unit, hermes-gateway.service (Restart=always)
 #   scheduling  -> Candybar, the single clock (retired 2026-10-11: no heartbeat
 #                  timer, no per-agent timer, no private poll loop; recurring work
-#                  is a Candybar manifest). Bloodbank carries the resulting
-#                  command events (krebs pull-subscribes
-#                  bloodbank.cmd.lifecycle.task.invoke); it is not the clock.
+#                  is a Candybar manifest). Candybar fires
+#                  `krebs tick`, which dispatches over
+#                  bloodbank.cmd.agent.invocation.start; Bloodbank is not the clock.
 #   persistence -> krebs (lifecycle v2): a failed turn is marked agent:failed,
 #                  a hold label that takes the ticket out of the flow (no
 #                  slot, no redispatch) instead of ticking forever

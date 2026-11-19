@@ -2,9 +2,10 @@
 
 > **Krebs lifecycle v2 (2026-11-14).** "Review lane" means In Progress + `lifecycle:review`;
 > `tp transition <id> started` and the review/decision lanes no longer exist. The verdict giver
-> is the Launch Director (the PM where there is none). Accepted: close (Done). Held or sent
-> back: Todo with `returned: <criterion>`; Krebs re-dispatches. This review is an optional
-> evidence check for a contested verdict, never a substitute for it, and never a dispatch.
+> is the PM (Launch Directors are retired; Krebs sends the PM a `ticket-review` turn). Accepted:
+> `px close` (Done). Sent back: `px release` to Todo with `returned: <criterion>`; Krebs
+> re-dispatches. This independent review is the PM's evidence for code (the reviewer is never the
+> implementer), and never a dispatch.
 
 Status: sentinel engine protocol (provider-agnostic)
 
@@ -19,7 +20,7 @@ actively tries to break the work, surface unmet acceptance criteria, hidden
 regressions, and drift. On a clean adversarial verdict the loop treats the
 ticket as done and moves on — through the ticket-provider adapter
 (`tp transition <id> <state>`) — and emits a BloodBank decision event carrying
-the full report. This works identically on Linear, Plane, or Trello.
+the full report. This works identically on Plane or Trello.
 
 The operator's verification is **deferred** to end-of-product QA over the review
 lane, backed by a queryable decision trail. A downstream regression rollback is
@@ -144,7 +145,7 @@ Write `<ISSUE>.review.md`; the script validates it:
 ```markdown
 # Autonomous Review Report: <ISSUE>
 ## Issue
-- Linear/Plane/Trello issue: <ISSUE>
+- Plane/Trello issue: <ISSUE>
 - Review lane reason:
 ## Reviewer
 - Reviewer agent: <independent-agent-id>

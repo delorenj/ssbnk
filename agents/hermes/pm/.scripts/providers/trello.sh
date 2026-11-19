@@ -89,7 +89,8 @@ api() {
   method="$1"; path="$2"; extra="${3:-}"
   sep="?"; case "$path" in *\?*) sep="&" ;; esac
   url="$API/$path${sep}key=$TRELLO_KEY&token=$TRELLO_TOKEN${extra:+&$extra}"
-  curl -fsS -X "$method" "$url"
+  # Bounded like every provider call: a hung Trello must fail the caller, not wedge it.
+  curl -fsS --connect-timeout "${TRELLO_CONNECT_TIMEOUT:-10}" --max-time "${TRELLO_MAX_TIME:-60}" -X "$method" "$url"
 }
 
 # Resolve a normalized state to exactly one list on the board, printed as JSON

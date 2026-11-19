@@ -165,16 +165,20 @@ def policy_snapshot(profile, renderer):
     return text, delta, base, current
 
 
-def set_policy_locked(profile, renderer, *, dry_run=False, project_root=None, snapshot=None):
+def set_policy_locked(profile, renderer, *, dry_run=False, project_root=None, snapshot=None, desk_only=False):
     """Strict loadout policy; no recursive lock acquisition or project rebind."""
     text, old_delta, base, current = snapshot if snapshot is not None else policy_snapshot(profile, renderer)
     path = profile / "config.delta.yaml"
     config = profile / "config.yaml"
     delta = strict_delta(old_delta) if project_root is None else project_delta(old_delta, base, project_root, renderer)
+    if desk_only:
+        if project_root is not None:
+            raise RuntimeError("a desk-only loadout cannot bind a project")
+        delta["skills"]["project_discovery"] = False
     # THE expected config (base + delta + every renderer pin). A bare deep_merge here refused every
     # pinned desk as drift and, on write, stripped its pin.
     expected = renderer.expected_config(base, delta, profile.name)
-    if project_root is not None and (expected.get("skills") or {}).get("external_dirs") != []:
+    if (project_root is not None or desk_only) and (expected.get("skills") or {}).get("external_dirs") != []:
         raise RuntimeError("skills.external_dirs list patch conflicts with the strict profile loadout")
     if current is not None and not any(
         renderer.is_render_of(current, base, candidate, profile.name)
@@ -197,11 +201,11 @@ def set_policy_locked(profile, renderer, *, dry_run=False, project_root=None, sn
     return "updated"
 
 
-def set_policy(profile, source=None, *, renderer=None, dry_run=False):
+def set_policy(profile, source=None, *, renderer=None, dry_run=False, desk_only=False):
     if renderer is None:
         renderer = load_renderer(profile, source)
     with renderer.PROFILE_LOCK.ProfileConfigLock(profile):
-        return set_policy_locked(profile, renderer, dry_run=dry_run)
+        return set_policy_locked(profile, renderer, dry_run=dry_run, desk_only=desk_only)
 
 
 if __name__ == "__main__":

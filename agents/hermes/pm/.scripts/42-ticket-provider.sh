@@ -66,7 +66,13 @@ try:
     value = json.loads(path.read_text(encoding="utf-8"))
 except (OSError, UnicodeError, json.JSONDecodeError):
     raise SystemExit(1)
-raise SystemExit(0 if isinstance(value, dict) else 1)
+raise SystemExit(
+    0 if isinstance(value, dict)
+    and ("ticket_provider" not in value or (
+        isinstance(value["ticket_provider"], dict)
+        and ("type" not in value["ticket_provider"] or isinstance(value["ticket_provider"]["type"], str))
+    )) else 1
+)
 PY
 fi
 
@@ -125,7 +131,7 @@ import sys, os, json, pathlib, stat, tempfile
 (path, set_provider, provider, board_id, workspace, identifier, team,
  identifier_source) = sys.argv[1:9]
 # Providers that mint their own keys and hand them back on read.
-IDENTIFIER_ASSIGNING = ("plane", "linear")
+IDENTIFIER_ASSIGNING = ("plane",)
 if identifier and identifier_source not in ("provider", "proposed"):
     raise SystemExit(
         "refusing to persist ticket_provider.identifier %r with source %r: "
@@ -240,9 +246,6 @@ mirror_to_role_yaml() {
     trello)
       [ -n "$bid" ] && yaml_set ticket_provider.board "$bid" 2>/dev/null || true
       ;;
-    linear)
-      [ -n "$team" ] && yaml_set ticket_provider.team "$team" 2>/dev/null || true
-      ;;
   esac
 }
 
@@ -257,10 +260,21 @@ SOT_TEAM="$(pj ticket_provider.team)"
 
 # role.yaml provider comes from copier --data (the operator's pjangler choice).
 ROLE_PROVIDER="$(yaml_get ticket_provider.name)"
+# A stored binding is inspectable, not permission to run an unsupported adapter.
+# Check both sources before a linked board can be mirrored or written.
+for candidate in "$SOT_TYPE" "$ROLE_PROVIDER"; do
+  [ -z "$candidate" ] && continue
+  case "$candidate" in
+    plane|trello) ;;
+    *) die "unsupported ticket provider: $candidate (supported: plane, trello)" ;;
+  esac
+done
+
 
 if [ -n "$SOT_BOARD_ID" ]; then
   # ── BIND to the repo's existing board ──────────────────────────────────
-  PROVIDER="${SOT_TYPE:-${ROLE_PROVIDER:-plane}}"
+  [ -n "$SOT_TYPE" ] || die "existing board has no ticket_provider.type (supported: plane, trello)"
+  PROVIDER="$SOT_TYPE"
   if [ -n "$ROLE_PROVIDER" ] && [ "$ROLE_PROVIDER" != "$PROVIDER" ]; then
     warn "[42] requested provider '$ROLE_PROVIDER' but repo board is '$PROVIDER' (.project.json wins); binding to existing board"
   fi
@@ -276,11 +290,11 @@ if [ -n "$SOT_BOARD_ID" ]; then
   # "the board is confirmed" with "the provider named this key". Correct it
   # on the way through rather than carrying the lie into another manifest.
   case "$PROVIDER" in
-    plane|linear) ;;
+    plane) ;;
     *) if [ "$IDENT_SOURCE" = provider ]; then IDENT_SOURCE=proposed; fi ;;
   esac
   if [ "$PROVIDER" = plane ]; then
-    OUT="$(tp resolve)" || die "existing Plane board could not be validated"
+    OUT="$(TICKET_PROVIDER="$PROVIDER" tp resolve)" || die "existing Plane board could not be validated"
     LIVE_IDENT="$(printf '%s' "$OUT" | python3 -c 'import sys,json
 try: print(str(json.load(sys.stdin).get("identifier") or ""))
 except Exception: print("")')"
@@ -294,7 +308,8 @@ except Exception: print("")')"
 fi
 
 # ── No repo board yet: create ONE repo-named board (no role suffix) ───────
-PROVIDER="${ROLE_PROVIDER:-${SOT_TYPE:-plane}}"
+PROVIDER="${SOT_TYPE:-$ROLE_PROVIDER}"
+[ -n "$PROVIDER" ] || die "ticket provider is missing (supported: plane, trello)"
 log "[42] no board in .project.json — bootstrapping a repo board (provider: $PROVIDER)"
 
 # Identifier PROPOSAL for a brand-new board only. It is sent to the provider in
@@ -311,42 +326,18 @@ NAME="$(printf '%s' "$REPO" | tr '_-' '  ' | python3 -c 'import sys; print(" ".j
 DESC="Ticket board for $REPO"
 
 case "$PROVIDER" in
-  linear)
-    # Linear DOES mint an authoritative identifier — the team key — so nothing
-    # here ever persists the local proposal. Without a live team read there is
-    # no identifier to record, and the record simply carries none.
-    if [[ -z "${LINEAR_API_KEY:-}" ]]; then
-      warn "[42] LINEAR_API_KEY not set; set role.yaml/.project.json ticket_provider.team and re-run ./.scripts/42-ticket-provider.sh"
-      pj_write 1 linear "" "" "" "$SOT_TEAM" ""
-      mark_done 42-ticket-provider; exit 0
-    fi
-    OUT="$(tp resolve 2>/dev/null || true)"
-    BID="$(printf '%s' "$OUT" | python3 -c 'import sys,json
-try: print(json.load(sys.stdin).get("board_id",""))
-except Exception: print("")')"
-    LIVE_IDENT="$(printf '%s' "$OUT" | python3 -c 'import sys,json
-try: print(str(json.load(sys.stdin).get("identifier") or ""))
-except Exception: print("")')"
-    if [ -n "$BID" ]; then
-      [ -n "$LIVE_IDENT" ] || die "linear resolved a team with no authoritative key"
-      mirror_to_role_yaml linear "$BID" "" "$LIVE_IDENT" "$SOT_TEAM"
-      pj_write 1 linear "$BID" "" "$LIVE_IDENT" "$SOT_TEAM" provider
-    else
-      warn "[42] linear resolve returned no board; set ticket_provider.team and re-run"
-      pj_write 1 linear "" "" "" "$SOT_TEAM" ""
-    fi
-    ;;
-
   plane|trello)
     KEYVAR=PLANE_API_KEY; [ "$PROVIDER" = trello ] && KEYVAR=TRELLO_KEY
     if [[ -z "${!KEYVAR:-}" ]]; then
       warn "[42] $KEYVAR not set; skipping board creation. Set creds and re-run ./.scripts/42-ticket-provider.sh"
       # Deferred: no board was created, so there is no confirmed identifier.
       # Persist nothing rather than freezing the proposal into .project.json.
-      pj_write 1 "$PROVIDER" "" "${SOT_WS:-$PLANE_WORKSPACE}" "" "" ""
+      WS="${SOT_WS:-$PLANE_WORKSPACE}"
+      [ "$PROVIDER" = trello ] && WS=""
+      pj_write 1 "$PROVIDER" "" "$WS" "" "" ""
       mark_done 42-ticket-provider; exit 0
     fi
-    OUT="$(tp create_board "$NAME" "$PROPOSED_IDENT" "$DESC")" || die "create_board failed for $PROVIDER"
+    OUT="$(TP_PROVISIONING=1 TICKET_PROVIDER="$PROVIDER" tp create_board "$NAME" "$PROPOSED_IDENT" "$DESC")" || die "create_board failed for $PROVIDER"
     BID="$(printf '%s' "$OUT" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("board_id",""))')"
     LIVE_IDENT="$(printf '%s' "$OUT" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("identifier","") or "")')"
     WS="${SOT_WS:-$PLANE_WORKSPACE}"
@@ -371,7 +362,7 @@ except Exception: print("")')"
     pj_write 1 "$PROVIDER" "$BID" "$WS" "$LIVE_IDENT" "" "$IDENT_SOURCE"
     ;;
 
-  *) die "unknown ticket provider: $PROVIDER (expected linear|plane|trello)" ;;
+  *) die "unknown ticket provider: $PROVIDER (expected plane|trello)" ;;
 esac
 
 mark_done 42-ticket-provider

@@ -151,9 +151,10 @@ board, and route work to other agents (e.g. the `ssbnk-dev` role).
 
 **Prime directives (non-negotiable):**
 - **Never mutate code** — every code change flows through a delegated worker.
-- **Krebs lifecycle v2: two slots, Krebs dispatches** (`~/code/33GOD/krebs/docs/lifecycle.md`). Boards have the five stock lanes; meaning lives in labels. Entering Todo starts a triage turn that ends with `lifecycle:triaged` (or `lifecycle:needs-input` plus the question). `krebs tick` alone moves triaged Todo tickets into In Progress, two per scope by default (`plane.wip`), in your Todo order: you keep the queue ordered and unblocked, you never dispatch implementation yourself, and you never add or remove `agent:working`. A held (`lifecycle:needs-input`, `lifecycle:blocked`, `agent:failed`) or review (`lifecycle:review`) ticket holds no slot. Sequence tickets whose file scopes clearly collide with a `--blocks` relation; Krebs will not dispatch a blocked one.
+- **Krebs lifecycle v2: two slots, Krebs dispatches** (`~/code/33GOD/krebs/docs/lifecycle.md`). Boards have the five stock lanes; meaning lives in labels. Entering Todo starts a triage turn that ends with `lifecycle:triaged` (or `lifecycle:needs-input` plus the question). `krebs tick` alone moves triaged Todo tickets into In Progress, two per scope by default (`plane.wip`), in your Todo order: you keep the queue ordered and unblocked, you never dispatch implementation yourself, and you never add or remove `agent:working`. A held (`lifecycle:needs-input`, `lifecycle:blocked`, `lifecycle:human`, `agent:failed`) or review (`lifecycle:review`) ticket holds no slot. `lifecycle:human` means the owner took the ticket by hand: leave it alone, do not comment-nag, never add or remove the label; only the owner does. Sequence tickets whose file scopes clearly collide with a `--blocks` relation; Krebs will not dispatch a blocked one.
 - **Board-driver lease** (`.scripts/board-lease.py` → `runtime/wip-driver.lock`) is not a WIP limit: it only serializes short board selection/transition passes with other drivers (interactive sessions, jobs, other agents). It is yours only under the exact owner string you were handed or acquired with. If the launcher that started your pass already holds it for you (the prompt ends with a "Board-driver lease for THIS pass" section naming the owner), that owner is you: check, refresh, release and, after an early release, re-acquire it with that exact string written out literally, and never acquire it under another name (your own lease would refuse you; that is not a sibling pass). With no launcher (a Bloodbank, crank or chat turn), pick one owner for the turn, `hermes:<agent_id>:<turn tag>`, write it out literally and reuse it for every lease command in that turn (never regenerate it), with the default ttl and periodic refresh. Back off whenever it is held fresh by any other owner: an interactive session, a job, another agent, or another pass or turn of your own desk. Release before waiting on workers. Never use it, or an In Progress ticket, to refuse dispatching a different ready ticket.
 - **Reviewer ≠ implementer** — independent adversarial review is the normal path.
+- **You give the review verdict** (launch mode or steady; no Launch Director desk exists). Krebs sends you a `ticket-review` turn for a ticket sitting In Progress with `lifecycle:review`. Judge the acceptance criteria against the evidence; for code, delegate an independent review worker rather than trusting the implementer's summary. Accepted: `px close <ref> -m "<one-line reason, link the evidence>"`. Sent back: `px release <ref> -m "returned: <the unmet criterion>"` (back to Todo, keeps `lifecycle:triaged`; Krebs strips `lifecycle:review` outside In Progress). Cannot judge without a person: `+lifecycle:needs-input` with the question as a comment.
 - **Evidence over status** — a board column is a claim; repo evidence is proof.
 - **Anti-stall** — never park a pass on operator sign-off.
 - **Respect the pillars** — cite the pillar(s) that drove a consequential call.
@@ -196,9 +197,8 @@ Decision events you commonly emit:
 
 Ticket facts are not yours to emit: `bloodbank.repo.task.*` and
 `bloodbank.repo.board.*` come only from the Plane webhook (n8n
-`Plane → Bloodbank`). To create a ticket, run `px task create` (or send
-`bloodbank.cmd.lifecycle.task.invoke` with `data.command.operation: create`
-once the board is Krebs-managed); the webhook echo of that write is the fact.
+`Plane → Bloodbank`). To create a ticket, run `px task create`; the
+webhook echo of that write is the fact.
 
 Put `repo = ssbnk` in event data; never insert repo or agent
 identifiers into Bloodbank type or subject tokens.
