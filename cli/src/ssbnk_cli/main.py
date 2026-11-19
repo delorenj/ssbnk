@@ -10,7 +10,7 @@ from rich.table import Table
 
 from .clipboard import copy_to_wl_clipboard
 from .config import get_config_map, load_all_config
-from .get import get_most_recent_screenshot
+from .get import get_recent_screenshots
 
 app = typer.Typer(
     name="ssbnk",
@@ -25,11 +25,15 @@ err_console = Console(stderr=True)
 
 @app.command("get")
 def get(
+    num: Annotated[
+        int,
+        typer.Argument(help="Number of recent images to return (default: 1; must be positive)."),
+    ] = 1,
     copy: Annotated[
         bool,
         typer.Option(
             "--copy/--no-copy",
-            help="Put screenshot path in wl-copy clipboard (default: enabled).",
+            help="Copy the plain-text paths to wl-clipboard (default: enabled).",
         ),
     ] = True,
     quiet: Annotated[
@@ -41,23 +45,22 @@ def get(
         ),
     ] = False,
 ) -> None:
-    """Print the path of the most recent screenshot and copy it to wl-clipboard."""
+    """Print absolute local image paths, one per line; fewer than requested is OK."""
+    if num < 1:
+        raise typer.BadParameter("must be a positive integer", param_hint="num")
     config = get_config_map()
-    screenshot_path = get_most_recent_screenshot(config)
+    images = get_recent_screenshots(config, num)
 
-    if not screenshot_path:
+    if not images:
         err_console.print("[red]Error:[/red] No recent screenshot found.")
         raise typer.Exit(code=1)
 
-    path_str = str(screenshot_path)
-
-    # 1. Print path of the most recent screenshot to stdout
-    sys.stdout.write(path_str + "\n")
+    payload = "\n".join(str(image) for image in images)
+    sys.stdout.write(payload + "\n")
     sys.stdout.flush()
 
-    # 2. Put path in wl-copy clipboard too
     if copy:
-        ok, err = copy_to_wl_clipboard(path_str)
+        ok, err = copy_to_wl_clipboard(payload)
         if not ok and not quiet:
             err_console.print(f"[yellow]Warning:[/yellow] Could not copy to wl-clipboard: {err}")
 

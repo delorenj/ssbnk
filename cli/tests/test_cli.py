@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -39,94 +40,206 @@ class TestSSBNKCLI(unittest.TestCase):
         result = runner.invoke(app, ["config", "UNKNOWN_KEY_XYZ_987"])
         self.assertNotEqual(result.exit_code, 0)
 
-    def test_get_from_marker(self) -> None:
+    def test_marker_precedes_newer_images_and_clipboard_matches_stdout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp = Path(tmp_dir)
-            state_dir = tmp / "state"
-            hosted_dir = tmp / "hosted"
-            state_dir.mkdir()
-            hosted_dir.mkdir()
+            root = Path(tmp_dir)
+            hosted = root / "hosted"
+            screenshots = root / "screenshots"
+            state = root / "state"
+            for directory in (hosted, screenshots, state):
+                directory.mkdir()
+            marked = hosted / "old image.PNG"
+            newer = screenshots / "new.jpg"
+            newest = hosted / "newest.webp"
+            for image, mtime in ((marked, 100), (newer, 200), (newest, 300)):
+                image.write_bytes(b"image")
+                os.utime(image, (mtime, mtime))
+            (state / "last-screenshot").write_text(marked.name + "\n")
+            config = self._config(root, hosted=hosted, screenshots=screenshots, state=state)
+            expected = "\n".join(str(p.resolve()) for p in (marked, newest, newer))
+            with patch("ssbnk_cli.main.get_config_map", return_value=config), patch(
+                "ssbnk_cli.main.copy_to_wl_clipboard", return_value=(True, None)
+            ) as copied:
+                for args in (["get", "3"], ["get", "3", "--copy"]):
+                    with self.subTest(args=args):
+                        result = runner.invoke(app, args)
+                        self.assertEqual(result.exit_code, 0, result.output)
+                        self.assertEqual(result.stdout, expected + "\n")
+                self.assertEqual(copied.call_count, 2)
+                copied.assert_called_with(expected)
 
-            test_img = hosted_dir / "shot1.png"
-            test_img.write_text("dummy")
+                for args in (["get"], ["get", "1"]):
+                    with self.subTest(args=args):
+                        self.assertEqual(runner.invoke(app, args).stdout, str(marked.resolve()) + "\n")
+                copied.assert_called_with(str(marked.resolve()))
 
-            marker = state_dir / "last-screenshot"
-            marker.write_text("shot1.png\n")
-
-            env_patch = {
-                "SSBNK_STATE_DIR": str(state_dir),
-                "SSBNK_HOSTED_DIR": str(hosted_dir),
-                "SSBNK_SCREENSHOT_DIR": str(tmp / "screenshots"),
-            }
-
-            with patch.dict(os.environ, env_patch), \
-                 patch("ssbnk_cli.main.copy_to_wl_clipboard", return_value=(True, None)) as mock_copy:
-                result = runner.invoke(app, ["get"])
+    def test_scan_ties_dedup_overlapping_dirs_and_filters_nonimages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            hosted = root / "hosted"
+            hosted.mkdir()
+            z = hosted / "z.gif"
+            a = hosted / "a.jpeg"
+            for image in (z, a):
+                image.write_bytes(b"image")
+                os.utime(image, ns=(1234567890123, 1234567890123))
+            (hosted / "not-image.txt").write_text("text")
+            (hosted / "folder.png").mkdir()
+            (hosted / "a-again.png").symlink_to(a)
+            config = self._config(root, hosted=hosted, screenshots=hosted)
+            with patch("ssbnk_cli.main.get_config_map", return_value=config), patch(
+                "ssbnk_cli.main.copy_to_wl_clipboard", return_value=(True, None)
+            ) as copied:
+                result = runner.invoke(app, ["get", "9"])
+                expected = f"{a.resolve()}\n{z.resolve()}"
                 self.assertEqual(result.exit_code, 0)
-                self.assertEqual(result.output.strip(), str(test_img.resolve()))
-                mock_copy.assert_called_once_with(str(test_img.resolve()))
+                self.assertEqual(result.stdout, expected + "\n")
+                copied.assert_called_once_with(expected)
 
-    def test_get_fallback_scan(self) -> None:
+    def test_stale_and_nonimage_markers_fall_back_to_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp = Path(tmp_dir)
-            hosted_dir = tmp / "hosted"
-            hosted_dir.mkdir()
+            root = Path(tmp_dir)
+            hosted = root / "hosted"
+            state = root / "state"
+            hosted.mkdir()
+            state.mkdir()
+            image = hosted / "shot.png"
+            image.write_bytes(b"image")
+            text = hosted / "notes.txt"
+            text.write_text("text")
+            config = self._config(root, hosted=hosted, state=state)
+            for marker in ("missing.png", str(text), "notes.txt"):
+                with self.subTest(marker=marker):
+                    (state / "last-screenshot").write_text(marker)
+                    with patch("ssbnk_cli.main.get_config_map", return_value=config):
+                        self.assertEqual(runner.invoke(app, ["get", "--no-copy"]).stdout, str(image.resolve()) + "\n")
 
-            older_img = hosted_dir / "older.png"
-            older_img.write_text("older")
-            os.utime(older_img, (1000, 1000))
+    def test_absolute_marker_and_data_hosted_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            hosted = root / "data" / "hosted"
+            state = root / "state"
+            hosted.mkdir(parents=True)
+            state.mkdir()
+            image = hosted / "image.png"
+            image.write_bytes(b"image")
+            outside = root / "outside.webp"
+            outside.write_bytes(b"image")
+            (state / "last-screenshot").write_text(str(outside))
+            config = self._config(root, hosted="", state=state)
+            config["SSBNK_DATA_DIR"] = str(root / "data")
+            with patch("ssbnk_cli.main.get_config_map", return_value=config), patch(
+                "ssbnk_cli.main.copy_to_wl_clipboard", return_value=(True, None)
+            ) as copied:
+                result = runner.invoke(app, ["get", "2"])
+                self.assertEqual(result.stdout, f"{outside.resolve()}\n{image.resolve()}\n")
+                copied.assert_called_once_with(f"{outside.resolve()}\n{image.resolve()}")
 
-            newer_img = hosted_dir / "newer.png"
-            newer_img.write_text("newer")
-            os.utime(newer_img, (2000, 2000))
-
-            env_patch = {
-                "SSBNK_STATE_DIR": str(tmp / "empty_state"),
-                "SSBNK_HOSTED_DIR": str(hosted_dir),
-                "SSBNK_SCREENSHOT_DIR": str(tmp / "empty_screenshots"),
-            }
-
-            with patch.dict(os.environ, env_patch), \
-                 patch("ssbnk_cli.main.copy_to_wl_clipboard", return_value=(True, None)) as mock_copy:
-                result = runner.invoke(app, ["get"])
+    def test_ledger_only_when_directories_have_no_images(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            ledger = root / ".local/state/ssbnk/ledger.db"
+            ledger.parent.mkdir(parents=True)
+            old = root / "old.jpg"
+            newer = root / "new.gif"
+            for image in (old, newer):
+                image.write_bytes(b"image")
+            conn = sqlite3.connect(ledger)
+            try:
+                conn.execute("CREATE TABLE captures (kind TEXT, capture_time TEXT, identity TEXT)")
+                for kind, time, identity in (
+                    ("image", "2026-01-01", {"path": str(old)}),
+                    ("video", "2026-07-01", {"path": str(newer)}),
+                    ("image", "2026-06-01", {"path": str(newer)}),
+                    ("image", "2026-05-01", {"path": str(root / "missing.png")}),
+                    ("image", "2026-04-01", {"path": str(newer)}),
+                    ("image", "2026-03-01", {"bad": "path"}),
+                ):
+                    conn.execute("INSERT INTO captures VALUES (?, ?, ?)", (kind, time, json.dumps(identity)))
+                conn.commit()
+            finally:
+                conn.close()
+            config = self._config(root)
+            with patch("ssbnk_cli.get.Path.home", return_value=root), patch(
+                "ssbnk_cli.main.get_config_map", return_value=config
+            ), patch("ssbnk_cli.main.copy_to_wl_clipboard", return_value=(True, None)) as copied:
+                result = runner.invoke(app, ["get", "4"])
+                expected = f"{newer.resolve()}\n{old.resolve()}"
                 self.assertEqual(result.exit_code, 0)
-                self.assertEqual(result.output.strip(), str(newer_img.resolve()))
-                mock_copy.assert_called_once_with(str(newer_img.resolve()))
+                self.assertEqual(result.stdout, expected + "\n")
+                copied.assert_called_once_with(expected)
+                hosted = Path(config["SSBNK_HOSTED_DIR"])
+                hosted.mkdir()
+                directory_image = hosted / "dir.png"
+                directory_image.write_bytes(b"image")
+                result = runner.invoke(app, ["get", "4", "--no-copy"])
+                self.assertEqual(result.stdout, str(directory_image.resolve()) + "\n")
 
-    def test_get_no_screenshot(self) -> None:
+    def test_no_images_exits_one_without_clipboard(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp = Path(tmp_dir)
-            env_patch = {
-                "SSBNK_STATE_DIR": str(tmp / "empty_state"),
-                "SSBNK_HOSTED_DIR": str(tmp / "empty_hosted"),
-                "SSBNK_SCREENSHOT_DIR": str(tmp / "empty_screenshots"),
-                "SSBNK_DATA_DIR": str(tmp / "empty_data"),
-            }
-
-            with patch.dict(os.environ, env_patch), \
-                 patch("ssbnk_cli.get.Path.home", return_value=tmp):
-                result = runner.invoke(app, ["get"])
+            root = Path(tmp_dir)
+            with patch("ssbnk_cli.get.Path.home", return_value=root), patch(
+                "ssbnk_cli.main.get_config_map", return_value=self._config(root)
+            ), patch("ssbnk_cli.main.copy_to_wl_clipboard") as copied:
+                result = runner.invoke(app, ["get", "2"])
                 self.assertEqual(result.exit_code, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("No recent screenshot", result.stderr)
+                copied.assert_not_called()
 
-    def test_get_no_copy_flag(self) -> None:
+    def test_invalid_count_fails_before_lookup(self) -> None:
+        with patch("ssbnk_cli.main.get_config_map") as lookup, patch(
+            "ssbnk_cli.main.copy_to_wl_clipboard"
+        ) as copied:
+            for args in (["0"], ["-1"], ["abc"], ["1.5"], ["1", "2"]):
+                with self.subTest(args=args):
+                    result = runner.invoke(app, ["get", *args])
+                    self.assertNotEqual(result.exit_code, 0)
+                    self.assertEqual(result.stdout, "")
+                    self.assertTrue(result.stderr)
+            lookup.assert_not_called()
+            copied.assert_not_called()
+
+    def test_no_copy_and_warning_modes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp = Path(tmp_dir)
-            hosted_dir = tmp / "hosted"
-            hosted_dir.mkdir()
-            img = hosted_dir / "shot.png"
-            img.write_text("img")
+            root = Path(tmp_dir)
+            hosted = root / "hosted"
+            hosted.mkdir()
+            image = hosted / "shot.png"
+            image.write_bytes(b"image")
+            with patch("ssbnk_cli.main.get_config_map", return_value=self._config(root)), patch(
+                "ssbnk_cli.main.copy_to_wl_clipboard", return_value=(False, "wl-copy missing")
+            ) as copied:
+                no_copy = runner.invoke(app, ["get", "--no-copy"])
+                self.assertEqual(no_copy.exit_code, 0)
+                self.assertEqual(no_copy.stdout, str(image.resolve()) + "\n")
+                self.assertEqual(no_copy.stderr, "")
+                copied.assert_not_called()
+                warning = runner.invoke(app, ["get"])
+                self.assertEqual(warning.exit_code, 0)
+                self.assertEqual(warning.stdout, no_copy.stdout)
+                self.assertIn("wl-copy missing", warning.stderr)
+                for flag in ("--quiet", "-q"):
+                    quiet = runner.invoke(app, ["get", flag])
+                    self.assertEqual(quiet.exit_code, 0)
+                    self.assertEqual(quiet.stdout, no_copy.stdout)
+                    self.assertEqual(quiet.stderr, "")
 
-            env_patch = {
-                "SSBNK_STATE_DIR": str(tmp / "empty_state"),
-                "SSBNK_HOSTED_DIR": str(hosted_dir),
-            }
+    def test_help_describes_count_and_paths(self) -> None:
+        result = runner.invoke(app, ["get", "--help"])
+        self.assertEqual(result.exit_code, 0)
+        for phrase in ("[num]", "default: 1", "absolute local image paths", "fewer than requested"):
+            self.assertIn(phrase, result.stdout)
 
-            with patch.dict(os.environ, env_patch), \
-                 patch("ssbnk_cli.main.copy_to_wl_clipboard") as mock_copy:
-                result = runner.invoke(app, ["get", "--no-copy"])
-                self.assertEqual(result.exit_code, 0)
-                self.assertEqual(result.output.strip(), str(img.resolve()))
-                mock_copy.assert_not_called()
+    @staticmethod
+    def _config(root: Path, *, hosted: Path | str | None = None,
+                screenshots: Path | None = None, state: Path | None = None) -> dict[str, str]:
+        return {
+            "SSBNK_STATE_DIR": str(state or root / "state"),
+            "SSBNK_HOSTED_DIR": str(hosted if hosted is not None else root / "hosted"),
+            "SSBNK_SCREENSHOT_DIR": str(screenshots or root / "screenshots"),
+            "SSBNK_DATA_DIR": str(root / "data"),
+        }
 
 
 if __name__ == "__main__":

@@ -7,89 +7,110 @@ from pathlib import Path
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
 
-def get_most_recent_screenshot(config: dict[str, str]) -> Path | None:
-    """Resolve the most recent screenshot path using ssbnk state, directories, or ledger."""
-    # 1. Check state marker in SSBNK_STATE_DIR
-    state_dir = Path(config.get("SSBNK_STATE_DIR", "/data/state")).expanduser()
-    marker_path = state_dir / "last-screenshot"
+def _image_path(path: Path) -> Path | None:
+    try:
+        if path.suffix.lower() in IMAGE_EXTENSIONS and path.is_file():
+            return path.resolve()
+    except (OSError, RuntimeError):
+        pass
+    return None
 
-    if marker_path.is_file():
-        try:
-            marker = marker_path.read_text(encoding="utf-8").strip()
-            if marker:
-                # If marker is an absolute path and exists
-                if marker.startswith("/"):
-                    p = Path(marker)
-                    if p.is_file():
-                        return p.resolve()
 
-                # If marker is a filename, search candidate hosted and screenshot locations
-                filename = Path(marker).name
-                search_dirs: list[Path] = []
-                if raw_hosted := config.get("SSBNK_HOSTED_DIR", "").strip():
-                    search_dirs.append(Path(raw_hosted).expanduser())
-                elif raw_data := config.get("SSBNK_DATA_DIR", "").strip():
-                    search_dirs.append(Path(raw_data).expanduser() / "hosted")
-                if raw_screenshots := config.get("SSBNK_SCREENSHOT_DIR", "").strip():
-                    search_dirs.append(Path(raw_screenshots).expanduser())
-
-                for directory in search_dirs:
-                    if directory.is_dir():
-                        candidate = directory / filename
-                        if candidate.is_file():
-                            return candidate.resolve()
-        except OSError:
-            pass
-
-    # 2. Filesystem scan fallback: check directories for latest image file
-    candidates: list[Path] = []
-    scan_dirs: list[Path] = []
+def _image_directories(config: dict[str, str]) -> list[Path]:
+    directories: list[Path] = []
     if raw_hosted := config.get("SSBNK_HOSTED_DIR", "").strip():
-        scan_dirs.append(Path(raw_hosted).expanduser())
+        directories.append(Path(raw_hosted).expanduser())
     elif raw_data := config.get("SSBNK_DATA_DIR", "").strip():
-        scan_dirs.append(Path(raw_data).expanduser() / "hosted")
+        directories.append(Path(raw_data).expanduser() / "hosted")
     if raw_screenshots := config.get("SSBNK_SCREENSHOT_DIR", "").strip():
-        scan_dirs.append(Path(raw_screenshots).expanduser())
+        directories.append(Path(raw_screenshots).expanduser())
+    return directories
 
+
+def _marked_image(config: dict[str, str], directories: list[Path]) -> Path | None:
+    marker_path = Path(config.get("SSBNK_STATE_DIR", "/data/state")).expanduser() / "last-screenshot"
+    try:
+        marker = marker_path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return None
+    if not marker:
+        return None
+    if Path(marker).is_absolute():
+        return _image_path(Path(marker))
+    filename = Path(marker).name
+    for directory in directories:
+        if candidate := _image_path(directory / filename):
+            return candidate
+    return None
+
+
+def _directory_images(directories: list[Path]) -> list[Path]:
+    images: dict[Path, int] = {}
     seen_dirs: set[Path] = set()
-    for directory in scan_dirs:
+    for directory in directories:
         try:
             resolved_dir = directory.resolve()
-        except OSError:
-            continue
-        if resolved_dir in seen_dirs or not resolved_dir.is_dir():
-            continue
-        seen_dirs.add(resolved_dir)
-
-        try:
+            if resolved_dir in seen_dirs or not resolved_dir.is_dir():
+                continue
+            seen_dirs.add(resolved_dir)
             for entry in resolved_dir.iterdir():
-                if entry.is_file() and entry.suffix.lower() in IMAGE_EXTENSIONS:
-                    candidates.append(entry)
-        except OSError:
+                if image := _image_path(entry):
+                    try:
+                        images[image] = image.stat().st_mtime_ns
+                    except OSError:
+                        continue
+        except (OSError, RuntimeError):
             continue
+    return sorted(images, key=lambda p: (-images[p], str(p)))
 
-    if candidates:
-        # Sort by mtime descending
-        candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        return candidates[0].resolve()
 
-    # 3. Fallback: Check local SQLite ledger if present
+def _ledger_images() -> list[Path]:
     ledger_path = Path.home() / ".local/state/ssbnk/ledger.db"
-    if ledger_path.is_file():
+    if not ledger_path.is_file():
+        return []
+    images: list[Path] = []
+    try:
+        conn = sqlite3.connect(ledger_path, timeout=2.0)
         try:
-            conn = sqlite3.connect(ledger_path, timeout=2.0)
-            try:
-                row = conn.execute(
-                    "SELECT identity FROM captures WHERE kind='image' ORDER BY capture_time DESC LIMIT 1"
-                ).fetchone()
-                if row:
-                    identity = json.loads(row[0])
-                    raw_path = identity.get("path")
-                    if raw_path and Path(raw_path).is_file():
-                        return Path(raw_path).resolve()
-            finally:
-                conn.close()
-        except Exception:
-            pass
+            rows = conn.execute(
+                "SELECT identity FROM captures WHERE kind='image' "
+                "ORDER BY capture_time DESC, rowid DESC"
+            )
+            for (raw_identity,) in rows:
+                try:
+                    raw_path = json.loads(raw_identity).get("path")
+                    if raw_path and (image := _image_path(Path(raw_path).expanduser())):
+                        images.append(image)
+                except (TypeError, ValueError, OSError):
+                    continue
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error):
+        return []
+    return images
 
-    return None
+
+def get_recent_screenshots(config: dict[str, str], count: int = 1) -> list[Path]:
+    """Return distinct local images, with the marker first and ledger only if directories are empty."""
+    if count < 1:
+        raise ValueError("count must be positive")
+    directories = _image_directories(config)
+    marker = _marked_image(config, directories)
+    directory_images = _directory_images(directories)
+    results: list[Path] = []
+    seen: set[Path] = set()
+    for image in ([marker] if marker else []) + (
+        directory_images if directory_images else _ledger_images()
+    ):
+        if image not in seen:
+            seen.add(image)
+            results.append(image)
+            if len(results) == count:
+                break
+    return results
+
+
+def get_most_recent_screenshot(config: dict[str, str]) -> Path | None:
+    """Keep the single-image lookup API for existing callers."""
+    results = get_recent_screenshots(config)
+    return results[0] if results else None
