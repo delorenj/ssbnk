@@ -104,3 +104,21 @@ deployment:
 service_state:
   heartbeat: active
   gateway: active
+company_identity:
+  version: 1
+  subject: "e2378116-5976-400b-8788-668f18104d6d"
+  handle: "ssbnk-pm"
+  email: "ssbnk-pm@agents.delo.sh"
+  status: "active"
+  enrolled_at: "2026-11-20T02:31:56.921Z"
+  bindings:
+    cloudflare_access:
+      principal: "21ce5c95d18338cbcf0d474817cbe334.access"
+      instance: "https://delonet.cloudflareaccess.com"
+      credential_ref: "op://DeLoSecrets/fhofgbprxzm734kfwp3lfellq4/j6tfcfuyfq2vvxhx7ca4kzkkuq"
+    plane:
+      principal: "a4969ba8-504b-4b32-a152-d55268b698e4"
+      instance: "https://plane.delo.sh/33god"
+      credential_ref: "op://DeLoSecrets/axo2ame52jznyphgvqtl4luf74/credential"
+      attribution_mode: "native"
+      native_actor_id: "a4969ba8-504b-4b32-a152-d55268b698e4"
