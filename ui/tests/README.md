@@ -12,6 +12,10 @@ NODE_PATH="$HOME/.cache/ssbnk-browser-deps/node_modules" CHROME_EXECUTABLE=/path
 
 For Playwright's managed browser instead, run `$HOME/.cache/ssbnk-browser-deps/node_modules/.bin/playwright install chromium`, then omit `CHROME_EXECUTABLE`. The script starts a loopback fixture on an available port and stops it and the browser on exit. No watcher, production assets, or live clipboard is touched. Real Chromium clipboard writes and reads are asserted for normal success and delayed-success cases; only delayed timing, permission rejection, clipboard absence, and empty API response are controlled mocks.
 
+## Verified on 2026-11-22 (SSBNK-6 candidate)
+
+From the isolated `ssbnk-6-copy-race-regression` worktree based on `9446b5ef7180e7dc7492e3fded544afb8d8e95f1`, `npm ci --no-audit --no-fund`, `npm run build`, and the documented `NODE_PATH=... CHROME_EXECUTABLE=... node tests/gallery.cjs` command passed in `ui/` (Node 26.5.0, Playwright 1.65.1, installed Google Chrome). The build produced one static page with Astro/Vite deprecation warnings. The regression additionally checks list-view keyboard toggling, direct clicks on disabled selection/Copy controls during delayed success and rejection, no second pending write, and clipboard preservation after rejection. See [ssbnk-6-evidence.md](ssbnk-6-evidence.md) for candidate identity, guard audit, and the separate real-application clipboard-readback gap. This fixture is not a deployed application or desktop proof.
+
 ## Verified on 2026-11-18
 
 `npm run build` completed (Astro static build, one page). `NODE_PATH=... CHROME_EXECUTABLE=... node tests/gallery.cjs` returned:
