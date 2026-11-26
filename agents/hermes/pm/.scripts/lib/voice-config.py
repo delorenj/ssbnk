@@ -313,10 +313,48 @@ def classify_unmarked_snapshot(
     )
 
 
-def reconcile_delta(delta: dict, plugin: str, voice: str) -> None:
+VOICE_SLUG = r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+
+
+def desk_voice(tts: dict, plugin: str) -> str | None:
+    """The voice a desk pins in its delta, or None when it inherits the fleet base.
+
+    Vox speaks the top-level tts.voice before tts.<plugin>.voice, so a top-level
+    pin wins; a delta that pins only the provider leaf still means that voice.
+    """
+    top = tts.get("voice")
+    provider = tts.get(plugin)
+    own = provider.get("voice") if isinstance(provider, dict) else None
+    for candidate in (top, own):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def clear_pin(delta: dict, plugin: str) -> None:
+    """Drop a desk's voice pin so it inherits the fleet base voice again."""
+    tts = delta.get("tts")
+    if not isinstance(tts, dict):
+        return
+    tts.pop("voice", None)
+    provider = tts.get(plugin)
+    if isinstance(provider, dict):
+        provider.pop("voice", None)
+
+
+def reconcile_delta(delta: dict, plugin: str, voice: str | None = None) -> None:
+    """Wire the TTS plugin into a desk delta; never stamp the fleet default voice.
+
+    The fleet base (~/.hermes/config.yaml tts.<plugin>.voice / tts.voice) is THE
+    default voice. A desk pins a voice only when it is given one explicitly
+    (``voice``) or already pins one; that pin is written to BOTH leaves so the
+    voice the desk speaks is the voice it declares. With no pin the desk
+    inherits whatever the fleet base says, so changing the default reaches
+    every unpinned desk on the next render.
+    """
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", plugin):
         raise ContractError("invalid TTS plugin name")
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", voice):
+    if voice is not None and not re.fullmatch(VOICE_SLUG, voice):
         raise ContractError("invalid TTS voice name")
     plugins = delta.get("plugins") or {}
     if not isinstance(plugins, dict):
@@ -341,11 +379,23 @@ def reconcile_delta(delta: dict, plugin: str, voice: str) -> None:
         raise ContractError("tts delta must be a mapping")
     tts.pop("voxxy", None)
     tts["provider"] = plugin
-    tts["voice"] = voice
-    provider = tts.setdefault(plugin, {})
+    provider = tts.get(plugin, {})
     if not isinstance(provider, dict):
         raise ContractError(f"tts.{plugin} delta must be a mapping")
-    provider["voice"] = voice
+    pinned = voice if voice is not None else desk_voice(tts, plugin)
+    if pinned is None:
+        tts.pop("voice", None)
+        provider.pop("voice", None)
+        if provider:
+            tts[plugin] = provider
+        else:
+            tts.pop(plugin, None)
+        return
+    if not re.fullmatch(VOICE_SLUG, pinned):
+        raise ContractError("invalid TTS voice name")
+    tts["voice"] = pinned
+    provider["voice"] = pinned
+    tts[plugin] = provider
 
 
 def comments(original: bytes) -> list[str]:
@@ -461,7 +511,9 @@ def reconcile(args: argparse.Namespace) -> int:
         generated_original = snapshot(generated_path, 0o600)
         PROFILE_LOCK.test_snapshot_barrier("voice")
         delta = load_mapping(delta_path, required=False)
-        reconcile_delta(delta, args.plugin, args.voice)
+        if getattr(args, "clear", False):
+            clear_pin(delta, args.plugin)
+        reconcile_delta(delta, args.plugin, args.voice or None)
         delta_content = render_delta(delta, delta_original.content)
         generated_content = render_generated(base, delta, base_path, profile)
         try:
@@ -482,7 +534,9 @@ def check(args: argparse.Namespace) -> int:
             base = load_mapping(base_path)
             original_delta = load_mapping(delta_path, required=False)
             expected_delta = copy.deepcopy(original_delta)
-            reconcile_delta(expected_delta, args.plugin, args.voice)
+            if getattr(args, "clear", False):
+                clear_pin(expected_delta, args.plugin)
+            reconcile_delta(expected_delta, args.plugin, args.voice or None)
             generated = load_mapping(generated_path, required=False)
             if expected_delta == original_delta and generated == merge(
                 base, expected_delta, base_path, profile
@@ -508,7 +562,10 @@ def build_parser() -> argparse.ArgumentParser:
         child.add_argument("--delta", required=True)
         child.add_argument("--generated", required=True)
         child.add_argument("--plugin", required=True)
-        child.add_argument("--voice", required=True)
+        # Optional: omit it and the desk keeps its own pin or inherits the fleet base voice.
+        child.add_argument("--voice", default=None)
+        # Drop the desk's pin first: it inherits the fleet base voice again.
+        child.add_argument("--clear", action="store_true")
     return parser
 
 
