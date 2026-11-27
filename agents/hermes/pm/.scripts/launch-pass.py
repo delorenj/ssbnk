@@ -1,26 +1,62 @@
 #!/usr/bin/env python3
-"""launch-pass: the repo-agnostic launch-mode driver every PM role ships.
+"""launch-pass: the repo-agnostic mode driver every PM role ships (develop / launch / polish).
 
-An interval driver (the interval-driver skill). A script, not the model, holds the context. Launch
-mode is DECLARED by a committed file at the repo root, `.launch.yaml`; this script never guesses it
-and never edits it. No file, or any mode other than `launch`, means steady state: the snapshot is
-the single line `launch-mode: steady`, so the unchanged snapshot costs 0 tokens.
+An interval driver (the interval-driver skill). A script, not the model, holds the context. The mode
+is DECLARED by the owner in a committed file at the repo root, `.launch.yaml`; this script never
+guesses it and never edits it. Every reader normalises the mode: lowercase; `steady` is a legacy
+alias that reads as `develop`; an unknown or broken declaration reads as `develop` and is reported.
+`active` is `launch` or `polish`; `develop` (no pass runs) and `live` (in production: people can buy
+it and are using it) are quiet: the snapshot is the single line `launch-mode: develop` or
+`launch-mode: live`, so the unchanged snapshot costs 0 tokens.
 
-  launch-pass.py --monitor         stable snapshot (Hermes hashes it; unchanged = the agent never starts)
-  launch-pass.py --brief           the pass contract, the declaration, the rules pointer, the snapshot,
-                                   the untagged comments waiting, the roadmap and the plan schema
+  develop   the default: no file, `mode: develop`, or legacy `mode: steady`.
+  launch    racing a finish line: one pass = launch-pass.prompt.md, plus the launch dashboard.
+  polish    around-the-clock exploratory QA of the user experience: anything, however small, that can
+            be improved or fixed gets a ticket (`[area:kind] ...` words inside the title, never a colon
+            label; the driver adds the bare-word `polish` label). One pass = one QA cycle
+            (polish-pass.prompt.md). The monitor carries a `qa-slot` line (the UTC minute floored to
+            POLISH_SLOT_MINUTES, default 15) so every fire wakes the agent, and a
+            `polish-metrics proposed=N implemented=M cycles=K` line fed by the ledger
+            runtime/polish-metrics.json (the single source for the status line and `flume launch
+            status`; a missing or broken ledger is no metrics, never an error). Polish creates default
+            to the `polish` label, idempotency source `polish-pass`, key `polish:<hash>`; caps are 8
+            creates and 20 writes (LAUNCH_PASS_MAX still overrides the write cap); every --apply is one
+            cycle, even with zero writes; `implemented` refreshes from board state groups whenever the
+            board was read; a new `declared:` archives the old ledger to polish-metrics.<declared>.json;
+            the launch dashboard is launch-only (a polish plan's `dashboard` ops are refused).
+  live      in production: no pass.
+
+  launch-pass.py --monitor         stable snapshot (Hermes hashes it; unchanged = the agent never starts), ending with
+                                   the repo's own .scripts/launch-pass.repo-monitor lines (off-board state), if any
+  launch-pass.py --brief           the pass contract for the active mode (launch-pass.prompt.md or
+                                   polish-pass.prompt.md, then the repo's own .scripts/launch-pass.repo.md,
+                                   if any), the declaration, the rules pointer, the snapshot, the untagged
+                                   comments waiting, the roadmap and the plan schema; polish also prints the
+                                   metrics and the open polish ticket titles; launch also prints the launch
+                                   dashboard section
   launch-pass.py --apply [PLAN]    apply the agent's plan (default runtime/launch-pass.json) under the
                                    board-driver lease, with a write cap and a receipt
   launch-pass.py --check           parse and print the declaration as JSON (debugging; exit 1 if broken)
+  launch-pass.py --metrics         print the polish metrics ledger as JSON, with counts
 
 Declaration (`.launch.yaml`, no status inside):
-  mode: launch | steady          declared: YYYY-MM-DD       source: "<doc + owner decision>"
+  mode: develop | launch | polish | live   (steady = legacy develop)    declared: YYYY-MM-DD
+  source: "<doc + owner decision>"
   finish_line: "<what launched means>"    target_date: YYYY-MM-DD or empty
   contract: [<repo-relative paths>]       epic: <BOARD-n>
   scopes: [<child dirs>]         # optional, monorepo parent only: child directories whose px scope this PM also drives
   cut_line:                      # optional ranking hint; the board stays the truth
     launch_critical: [..]
     after_launch: [..]
+  polish:                        # `mode: polish` only
+    focus: [ux, physics]         # optional hint areas, never a limit: anything is ticketable
+    qa: ["mise run qa:explore"]  # optional repo commands a QA cycle may run (exploratory harness, e2e, screenshots)
+    wip: 4                       # Krebs WIP slots ("lanes") while polishing; default 4
+    cadence: "*/15 * * * *"      # Candybar schedule of the pass; default every 15 minutes (launch is hourly)
+    todo_depth: 8                # Todo is topped up to this many polish tickets; default 2 x wip
+  live_since: YYYY-MM-DD         # `mode: live` only: the day it went live (launch history fields stay)
+  live: {name, tagline, store_url, offer, platform, package, release, board, support, checkout,
+         fulfilment}            # `mode: live` only: read by the Holocene Live hub, never by this pass
 
 Allowed apply ops: comment, create, move, close, cancel, rank, link. Everything else is refused.
 `rank` has no px verb (px cannot reorder a lane), so it degrades to a `launch rank N` comment and the
@@ -31,9 +67,15 @@ be on this board; a ticket carrying `agent:working` is never moved, closed or ca
 and `cancel` need a `text`; create labels are bare words or a fleet open axis (risk:, needs:, xp:). A write
 whose fields have the wrong types is skipped, and the receipt is written whatever happens.
 
+In launch mode the plan may also carry `"dashboard": [ops]` (docs/launch-dashboard.md). They apply after
+the board writes through launch-dashboard.py, and every launch apply then re-renders and republishes the
+launch dashboard. A refused dashboard op says why; a failed publish is reported in the receipt and never
+undoes the board writes. In polish mode `dashboard` ops are refused with a receipt note.
+
 stdlib only, python3. The script lives in <repo>/agents/hermes/<role>/.scripts/ and finds the repo by
 walking up to `.project.json` (or `.git`); LAUNCH_REPO or --repo override. px runs with cwd = repo.
-Env: LAUNCH_PASS_DATE (YYYY-MM-DD, tests), LAUNCH_PASS_MAX (write cap, default 12),
+Env: LAUNCH_PASS_DATE (YYYY-MM-DD, tests), LAUNCH_PASS_NOW (ISO datetime, tests), LAUNCH_PASS_MAX (write
+cap, default 12, 20 in polish), POLISH_SLOT_MINUTES (qa-slot width in minutes, default 15),
 LAUNCH_LEASE_WAIT (seconds to wait for a held lease, default 45).
 """
 from __future__ import annotations
@@ -56,16 +98,31 @@ ROLE = ROLE_DIR.name
 RT = ROLE_DIR / "runtime"
 LEASE_SCRIPT = HERE / "board-lease.py"
 PROMPT = HERE / "launch-pass.prompt.md"
+POLISH_PROMPT = HERE / "polish-pass.prompt.md"  # the QA-cycle contract; brief() picks it when the mode is polish
+REPO_PROMPT = HERE / "launch-pass.repo.md"  # optional, repo-owned: the scaffold never writes, compares or removes it
+REPO_MONITOR = HERE / "launch-pass.repo-monitor"  # optional, repo-owned executable: off-board state (gate receipts) for the snapshot
+REPO_MONITOR_TIMEOUT_S = 60
+REPO_MONITOR_MAX_LINES = 40
+DASHBOARD = HERE / "launch-dashboard.py"
 ROADMAP = RT / "launch-roadmap.md"
 DEFAULT_PLAN = RT / "launch-pass.json"
 RECEIPTS = RT / "launch-receipts"
+METRICS = RT / "polish-metrics.json"  # the polish metrics ledger: the single source for the status line
 OPEN = {"backlog", "unstarted", "started"}
 ALLOWED_OPS = ("comment", "create", "move", "close", "cancel", "rank", "link")
 LANES = ("Backlog", "Todo")
 PRIORITIES = ("urgent", "high", "medium", "low", "none")
 REF = re.compile(r"^([A-Z][A-Z0-9]*)-(\d+)$")
 MAX_CREATES = 3
+MAX_CREATES_POLISH = 8
 ROADMAP_LINES = 40
+MODES = ("develop", "launch", "polish", "live")  # develop is the default; launch races a finish line; polish is exploratory QA; live is in production
+LEGACY_MODES = {"steady": "develop"}  # `steady` (pre-launch or internal) reads as develop everywhere
+POLISH_LABEL = "polish"
+POLISH_WIP_DEFAULT = 4
+POLISH_CADENCE_DEFAULT = "*/15 * * * *"
+WRITE_CAP_DEFAULT = 12
+WRITE_CAP_POLISH = 20
 WAITING_SHOWN = 40
 STALE_HOURS = 48
 AGENT_COMMENT = re.compile(r"^(\[[A-Za-z0-9 _:.-]+\]|krebs\b|hermes\b|momo\b)", re.I)
@@ -80,6 +137,13 @@ NEEDS_TEXT = ("comment", "close", "cancel")
 # --------------------------------------------------------------------------------------- time
 
 def now() -> datetime:
+    forced = os.environ.get("LAUNCH_PASS_NOW", "").strip()  # tests pin the clock to prove qa-slot rollover
+    if forced:
+        try:
+            dt = parse_ts(forced)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
     return datetime.now(timezone.utc)
 
 
@@ -102,6 +166,10 @@ def parse_ts(value: str) -> datetime:
 
 def et_date(value: str) -> str:
     return parse_ts(value).astimezone(et_zone()).strftime("%Y-%m-%d")
+
+
+def iso(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
 # ---------------------------------------------------------------------- repo + declaration
@@ -173,49 +241,45 @@ def _scalar(value: str):
 
 
 def parse_yaml(text: str) -> dict:
-    """The tiny YAML subset `.launch.yaml` uses: scalars, inline and block lists, one nested map."""
-    out: dict = {}
-    top: str | None = None   # open top-level key
-    sub: str | None = None   # open key inside a nested map
+    """The tiny YAML subset `.launch.yaml` uses: scalars, inline and block lists, maps nested by indent
+    (the `live:` block of a `mode: live` declaration goes three deep)."""
+    rows = []
     for raw in text.splitlines():
         line = _strip_comment(raw).rstrip()
-        if not line.strip():
-            continue
-        indent = len(line) - len(line.lstrip())
-        body = line.strip()
-        if indent == 0:
-            if ":" not in body:
+        if line.strip():
+            rows.append((len(line) - len(line.lstrip()), line.strip()))
+    if rows and rows[0][0] != 0:
+        raise ValueError(f"indented line with no parent: {rows[0][1]!r}")
+
+    def block(i: int, indent: int):
+        if rows[i][1].startswith("- "):
+            items = []
+            while i < len(rows) and rows[i][0] == indent and rows[i][1].startswith("- "):
+                items.append(_scalar(rows[i][1][2:]))
+                i += 1
+            return items, i
+        out: dict = {}
+        while i < len(rows) and rows[i][0] == indent:
+            body = rows[i][1]
+            if ":" not in body or body.startswith("- "):
                 raise ValueError(f"not a key: {body!r}")
             key, _, val = body.partition(":")
             key = key.strip()
-            top, sub = key, None
-            out[key] = _scalar(val) if val.strip() else None
-            continue
-        if top is None:
-            raise ValueError(f"indented line with no parent: {body!r}")
-        if body.startswith("- "):
-            item = _scalar(body[2:])
-            if sub is not None:
-                container = out[top]
-                if not isinstance(container, dict):
-                    raise ValueError(f"list item under non-map {top}")
-                if not isinstance(container.get(sub), list):
-                    container[sub] = []
-                container[sub].append(item)
+            i += 1
+            if val.strip():
+                out[key] = _scalar(val)
+            elif i < len(rows) and (rows[i][0] > indent or (rows[i][0] == indent and rows[i][1].startswith("- "))):
+                out[key], i = block(i, rows[i][0])
             else:
-                if not isinstance(out[top], list):
-                    out[top] = []
-                out[top].append(item)
-            continue
-        if ":" not in body:
-            raise ValueError(f"not a key: {body!r}")
-        key, _, val = body.partition(":")
-        if not isinstance(out[top], dict):
-            out[top] = {}
-        key = key.strip()
-        out[top][key] = _scalar(val) if val.strip() else None
-        sub = key
-    return out
+                out[key] = None
+        if i < len(rows) and rows[i][0] > indent:
+            raise ValueError(f"indented line with no parent: {rows[i][1]!r}")
+        return out, i
+
+    if not rows:
+        return {}
+    parsed, _ = block(0, 0)
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _list(value) -> list[str]:
@@ -226,10 +290,20 @@ def _list(value) -> list[str]:
     return [str(value).strip()]
 
 
+def _int(value, default: int, minimum: int = 1) -> int:
+    try:
+        n = int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return n if n >= minimum else default
+
+
 def load_declaration(repo: Path) -> dict:
-    """Always returns a dict with `active` (bool), never raises: no file or a broken file is steady."""
+    """Always returns a dict with `active` (bool), never raises: no file or a broken file is develop.
+    `mode` is one of develop | launch | polish | live (`steady` is a legacy alias of develop, an unknown
+    mode reads as develop and is reported in `error`); `active` is true for launch and polish."""
     path = repo / ".launch.yaml"
-    decl = {"active": False, "path": str(path), "error": "", "raw": "", "mode": "steady"}
+    decl = {"active": False, "path": str(path), "error": "", "raw": "", "mode": "develop"}
     try:
         raw = path.read_text()
     except OSError:
@@ -241,11 +315,19 @@ def load_declaration(repo: Path) -> dict:
         decl["error"] = str(e)
         return decl
     mode = str(data.get("mode") or "").strip().lower()
+    mode = LEGACY_MODES.get(mode, mode)
+    if mode not in MODES:
+        if mode:
+            decl["error"] = f"unknown mode {mode!r}"
+        mode = "develop"
     cut = data.get("cut_line") if isinstance(data.get("cut_line"), dict) else {}
+    polish = data.get("polish") if isinstance(data.get("polish"), dict) else {}
+    wip = _int(polish.get("wip"), POLISH_WIP_DEFAULT)
     decl.update(
-        mode=mode or "steady",
-        active=mode == "launch",
+        mode=mode,
+        active=mode in ("launch", "polish"),
         declared=str(data.get("declared") or ""),
+        live_since=str(data.get("live_since") or ""),
         source=str(data.get("source") or ""),
         finish_line=str(data.get("finish_line") or ""),
         target_date=str(data.get("target_date") or ""),
@@ -254,6 +336,11 @@ def load_declaration(repo: Path) -> dict:
         scopes=_list(data.get("scopes")),
         launch_critical=_list(cut.get("launch_critical")),
         after_launch=_list(cut.get("after_launch")),
+        focus=_list(polish.get("focus")),
+        qa=_list(polish.get("qa")),
+        wip=wip,
+        cadence=str(polish.get("cadence") or "").strip() or POLISH_CADENCE_DEFAULT,
+        todo_depth=_int(polish.get("todo_depth"), 2 * wip, minimum=0),
         sha=hashlib.sha256(raw.encode()).hexdigest()[:12],
     )
     return decl
@@ -393,14 +480,6 @@ def ref_dirs(repo: Path, decl: dict | None) -> tuple[str, dict[str, Path], dict[
     return ident, where, groups
 
 
-def board(repo: Path, decl: dict | None = None) -> tuple[str, list[dict]]:
-    ident, _, groups = ref_dirs(repo, decl)
-    refs = [r for r, g in groups.items() if g in OPEN]
-    with ThreadPoolExecutor(8) as pool:
-        rows = sorted(pool.map(lambda r: fetch_ticket(repo, r), refs), key=lambda r: r["seq"])
-    return ident, rows
-
-
 HUMAN_LABEL = "lifecycle:human"
 
 
@@ -429,19 +508,92 @@ def target_line(decl: dict) -> str:
         return f"target {t}"
 
 
+# ------------------------------------------------------------------------------------- polish
+
+def qa_slot() -> str:
+    """The UTC minute floored to POLISH_SLOT_MINUTES (default 15). The slot changes on every cadence
+    fire, so the monitor output changes and the Hermes job wakes the agent: polish runs around the clock."""
+    width = _int(os.environ.get("POLISH_SLOT_MINUTES"), 15)
+    n = now()
+    return n.replace(minute=(n.minute // width) * width % 60, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%MZ")
+
+
+def empty_metrics(decl: dict) -> dict:
+    return {"declared": decl.get("declared") or "", "cycles": 0, "proposed": [], "implemented": [], "updated_at": iso(now())}
+
+
+def load_metrics(decl: dict) -> dict:
+    """The polish metrics ledger (runtime/polish-metrics.json), the single source for the status line and
+    `flume launch status`. A missing or broken file is an empty ledger, never an error. A ledger whose
+    `declared` no longer matches the declaration's is archived to polish-metrics.<old declared>.json and a
+    fresh ledger starts."""
+    try:
+        data = json.loads(METRICS.read_text())
+        if not isinstance(data, dict):
+            raise ValueError("not an object")
+    except Exception:
+        return empty_metrics(decl)
+    old = str(data.get("declared") or "")
+    if old != (decl.get("declared") or ""):
+        try:
+            METRICS.replace(METRICS.with_name(f"polish-metrics.{old or 'undeclared'}.json"))
+        except OSError:
+            pass
+        return empty_metrics(decl)
+    return {
+        "declared": old,
+        "cycles": data.get("cycles") if isinstance(data.get("cycles"), int) and not isinstance(data.get("cycles"), bool) else 0,
+        "proposed": [p for p in data.get("proposed") or [] if isinstance(p, dict) and p.get("ref")],
+        "implemented": [r for r in data.get("implemented") or [] if isinstance(r, str)],
+        "updated_at": str(data.get("updated_at") or ""),
+    }
+
+
+def save_metrics(m: dict) -> None:
+    m["updated_at"] = iso(now())
+    METRICS.parent.mkdir(parents=True, exist_ok=True)
+    tmp = METRICS.with_suffix(".tmp")
+    tmp.write_text(json.dumps(m, indent=2) + "\n")
+    tmp.replace(METRICS)
+
+
+def refresh_implemented(m: dict, groups: dict[str, str]) -> bool:
+    """implemented = the proposed refs now in the `completed` state group. True when the ledger changed."""
+    have = set(m["implemented"])
+    new = {p["ref"] for p in m["proposed"] if p.get("ref") in groups and groups[p["ref"]] == "completed"} - have
+    if not new:
+        return False
+    m["implemented"] = m["implemented"] + sorted(new)
+    return True
+
+
+def metrics_line(m: dict) -> str:
+    return f"polish-metrics proposed={len(m['proposed'])} implemented={len(m['implemented'])} cycles={m['cycles']}"
+
+
 def snapshot_lines(decl: dict, rows: list[dict] | None) -> list[str]:
-    lines = [
-        "launch-mode: launch",
-        f"date {today()}",
-        f"declaration {decl['sha']}",
-        f"epic {decl.get('epic') or 'none'}",
-        target_line(decl),
-    ]
+    if decl["mode"] == "polish":
+        lines = [
+            "launch-mode: polish",
+            f"date {today()}",
+            f"declaration {decl['sha']}",
+            f"epic {decl.get('epic') or 'none'}",
+            f"qa-slot {qa_slot()}",
+            metrics_line(load_metrics(decl)),
+        ]
+    else:
+        lines = [
+            "launch-mode: launch",
+            f"date {today()}",
+            f"declaration {decl['sha']}",
+            f"epic {decl.get('epic') or 'none'}",
+            target_line(decl),
+        ]
     if rows is None:
         return lines + ["board UNAVAILABLE"]
     lc, al = set(decl["launch_critical"]), set(decl["after_launch"])
     for r in rows:
-        flags = ",".join(f for f, on in (("review", r["review"]), ("held", r["held"]), ("human", r["human"]), ("working", r["working"])) if on) or "-"
+        flags = ",".join(f for f, on in (("review", r["review"]), ("held", r["held"]), ("human", r["human"]), ("working", r["working"]), (POLISH_LABEL, POLISH_LABEL in r["labels"])) if on) or "-"
         cut = "lc" if r["ref"] in lc else "al" if r["ref"] in al else "-"
         lines.append("|".join([
             r["ref"], r["lane"], r["pri"], "bug" if r["bug"] else "-", flags, r["origin"], f"cut:{cut}",
@@ -455,15 +607,40 @@ def snapshot_lines(decl: dict, rows: list[dict] | None) -> list[str]:
     return lines
 
 
+def repo_monitor_lines(repo: Path) -> list[str]:
+    """The repo's own off-board state, so a change the board cannot show (a gate receipt, a store review state) wakes
+    the pass. Optional and repo-owned: `.scripts/launch-pass.repo-monitor` prints stable lines (no timestamps). Each is
+    prefixed `repo|`; a missing, failing or slow script is one fixed line, never an error."""
+    if not REPO_MONITOR.is_file():
+        return []
+    try:
+        out = subprocess.run([str(REPO_MONITOR)], cwd=repo, capture_output=True, text=True, timeout=REPO_MONITOR_TIMEOUT_S)
+    except (OSError, subprocess.SubprocessError):
+        return ["repo|UNAVAILABLE"]
+    if out.returncode != 0:
+        return ["repo|UNAVAILABLE"]
+    lines = [l.rstrip() for l in out.stdout.splitlines() if l.strip()]
+    extra = len(lines) - REPO_MONITOR_MAX_LINES
+    return ["repo|" + l for l in lines[:REPO_MONITOR_MAX_LINES]] + ([f"repo|{extra} more line(s) dropped"] if extra > 0 else [])
+
+
 def snapshot(repo: Path) -> tuple[dict, list[str], list[dict] | None, str]:
     decl = load_declaration(repo)
     if not decl["active"]:
-        return decl, ["launch-mode: steady"], None, ""
+        return decl, [f"launch-mode: {decl['mode']}"], None, ""
     try:
-        ident, rows = board(repo, decl)
+        ident, _, groups = ref_dirs(repo, decl)
+        refs = [r for r, g in groups.items() if g in OPEN]
+        with ThreadPoolExecutor(8) as pool:
+            rows = sorted(pool.map(lambda r: fetch_ticket(repo, r), refs), key=lambda r: r["seq"])
     except Exception:
-        return decl, snapshot_lines(decl, None), None, ""
-    return decl, snapshot_lines(decl, rows), rows, ident
+        return decl, snapshot_lines(decl, None) + repo_monitor_lines(repo), None, ""
+    if decl["mode"] == "polish":
+        # The board was read: refresh implemented (proposed refs now completed) cheaply from the listing.
+        m = load_metrics(decl)
+        if refresh_implemented(m, groups):
+            save_metrics(m)
+    return decl, snapshot_lines(decl, rows) + repo_monitor_lines(repo), rows, ident
 
 
 def monitor(repo: Path) -> int:
@@ -485,24 +662,62 @@ PLAN_SCHEMA = """\
   {"op": "link",    "ref": "<ID>-12", "other": "<ID>-13", "blocks": true},
   {"op": "link",    "ref": "<EPIC>", "other": "<ID>-12"}],
  "roadmap": "# whole new roadmap, at most 40 lines (omit on a quiet pass)",
+ "dashboard": [{"op": "upsert|check|uncheck|remove|requirement|marketplaces", "...": "ops and fields are in the dashboard section below; omit when nothing changed"}],
  "note": "one line"}"""
+
+
+def dashboard_module():
+    """launch-dashboard.py, loaded beside this file, or None when it is not shipped (an old scaffold)."""
+    if not DASHBOARD.is_file():
+        return None
+    mod = sys.modules.get("launch_dashboard")
+    if mod is None:
+        import importlib.util
+        sys.modules.setdefault("launch_pass", sys.modules[__name__])
+        spec = importlib.util.spec_from_file_location("launch_dashboard", DASHBOARD)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["launch_dashboard"] = mod
+        spec.loader.exec_module(mod)
+    return mod
+
+
+def dashboard_brief(repo: Path, decl: dict, rows: list[dict] | None) -> str:
+    try:
+        mod = dashboard_module()
+        return mod.brief_section(repo, decl, rows) if mod else "\n# Launch dashboard\n(launch-dashboard.py is missing: run flume remediate hermes.pm-scaffold)"
+    except Exception as e:  # the dashboard never breaks the pass's brief
+        return f"\n# Launch dashboard\n(unavailable: {type(e).__name__}: {e})"
 
 
 def brief(repo: Path) -> int:
     decl, lines, rows, ident = snapshot(repo)
+    mode = decl["mode"]
+    polish = mode == "polish"
     if not decl["active"]:
-        print("launch-mode: steady")
-        print("No launch declaration (.launch.yaml absent or mode is not `launch`). Nothing to do: answer `quiet: steady`.")
+        print(f"launch-mode: {mode}")
+        if mode == "live":
+            print("The product is live (.launch.yaml `mode: live`): there is no finish line to drive. Nothing to do: answer `quiet: live`.")
+        else:
+            print("No active mode declaration (.launch.yaml absent, or its mode is not `launch` or `polish`). Nothing to do: answer `quiet: develop`.")
         if decl.get("error"):
-            print(f"(.launch.yaml is unreadable: {decl['error']}. Treated as steady. Tell the owner in the pass note.)")
+            print(f"(.launch.yaml problem: {decl['error']}. Treated as develop. Tell the owner in the pass note.)")
         return 0
-    print(_read(PROMPT).rstrip() or "(launch-pass.prompt.md is missing: run flume remediate hermes.pm-scaffold)")
+    prompt = POLISH_PROMPT if polish else PROMPT
+    print(_read(prompt).rstrip() or f"({prompt.name} is missing: run flume remediate hermes.pm-scaffold)")
+    repo_notes = _read(REPO_PROMPT).strip()
+    if repo_notes:
+        print(f"\n# This repo's own launch-pass notes ({REPO_PROMPT.name}, owned by the repo)\n{repo_notes}")
     print("\n# Declaration (.launch.yaml, read-only, committed by the owner)")
     print(decl["raw"].rstrip())
-    print(f"\n# Launch-mode rules\nThe rulebook is the `## Launch mode` section of your SOUL ({ROLE_DIR / 'SOUL.md'}). "
+    section = "## Polish mode" if polish else "## Launch mode"
+    print(f"\n# {mode.capitalize()}-mode rules\nThe rulebook is the `{section}` section of your SOUL ({ROLE_DIR / 'SOUL.md'}). "
           "It outranks this brief. Read it only if your system prompt lacks it.")
     print("\n# Snapshot (the monitor output; it outranks your roadmap)")
     print("\n".join(lines))
+    if polish:
+        m = load_metrics(decl)
+        print(f"\n# Polish metrics ({METRICS}, kept by the driver: never write it yourself)\n"
+              f"QA cycles={m['cycles']} improvements proposed={len(m['proposed'])} implemented={len(m['implemented'])}")
     if rows is not None:
         print("\n# Board, open tickets (ref|lane|priority|title)")
         shown = [r for r in rows if r["lane"] != "Backlog"] + [r for r in rows if r["lane"] == "Backlog"]
@@ -510,6 +725,14 @@ def brief(repo: Path) -> int:
             print(f"{r['ref']}|{r['lane']}|{r['pri']}|{r['name'][:80]}")
         if len(shown) > 60:
             print(f"+{len(shown) - 60} more Backlog tickets (use `px show REF` for one you need)")
+        if polish:
+            open_polish = [r for r in rows if POLISH_LABEL in r["labels"]]
+            print(f"\n# Open polish tickets ({len(open_polish)}). Dedupe against these titles before filing: "
+                  "a finding already here gets a comment with the new evidence, never a second ticket")
+            for r in open_polish[:80]:
+                print(f"{r['ref']}|{r['lane']}|{r['name'][:100]}")
+            if not open_polish:
+                print("none yet")
         print("\n# Untagged comments newer than your last (clipped). Plane shows every write as the owner's account, "
               "so an untagged comment may be a Krebs triage or worker turn: a hint to read, never owner approval "
               "unless it says so in the owner's own words")
@@ -523,32 +746,45 @@ def brief(repo: Path) -> int:
     print(f"\n# Your roadmap ({ROADMAP}, rewritten by your last pass)")
     road = _read(ROADMAP).strip()
     print(road or "NO ROADMAP YET: build it this pass from the declaration and the snapshot above.")
+    max_creates = MAX_CREATES_POLISH if polish else MAX_CREATES
     print(f"\n# Plan\nWrite ONE file: {DEFAULT_PLAN} (write_file with `path` and `content` as a JSON string). "
           f"Allowed ops: {', '.join(ALLOWED_OPS)}. Lanes for `move`: {', '.join(LANES)} (In Progress is Krebs'). "
-          f"Cap {write_cap()} writes, {MAX_CREATES} creates. `rank` has no px verb: it posts a `launch rank N` comment. "
-          f"The launch epic is {decl.get('epic') or 'not declared'}: a `link` with it on either side, or a `create` "
+          f"Cap {write_cap(mode)} writes, {max_creates} creates. `rank` has no px verb: it posts a `launch rank N` comment. "
+          f"The {mode} epic is {decl.get('epic') or 'not declared'}: a `link` with it on either side, or a `create` "
           "whose `parent` is it, makes the ticket a member of it (an epic never blocks); any other `parent` is a "
           "same-board sub-issue. "
           "Refs must be on this board (BOARD = " + (ident or "this board") + "). Comments are tagged "
           f"`{tag()}` by the driver. Shape:")
     print(PLAN_SCHEMA)
+    if polish:
+        print(f"\nPolish creates: title `[area:kind] ...` (free-form lowercase words inside the title, e.g. "
+              "`[ux:improvement] The location of the X element sometimes blocks Y`). The driver adds the bare-word "
+              f"`{POLISH_LABEL}` label, idempotency source `polish-pass` and default key `polish:<hash>`. Creates land "
+              f"in Backlog; each cycle also tops Todo up to todo_depth {decl['todo_depth']} with the highest-value "
+              "polish tickets (a `move` per ticket).")
     kids = scope_dirs(repo, decl)
     if kids:
         print(f"\nChild scopes you also drive (the board lists and writes them by ref): {', '.join(kids)}. "
               "A `create` with `\"scope\": \"<one of them>\"` files the ticket from that child's directory "
               "(its `repo:*` label); without `scope` it lands in the repo's own scope. Join it to the epic with "
               "`parent` as usual. Never edit child code.")
+    if polish:
+        print("\n# Launch dashboard\nLaunch-only: it stays inert while polishing, and `dashboard` ops in a polish "
+              "plan are refused.")
+    else:
+        print(dashboard_brief(repo, decl, rows))
     print(f"\nApply with: python3 {Path(__file__).resolve()} --apply")
     return 0
 
 
 # --------------------------------------------------------------------------------------- apply
 
-def write_cap() -> int:
+def write_cap(mode: str = "") -> int:
+    default = WRITE_CAP_POLISH if mode == "polish" else WRITE_CAP_DEFAULT
     try:
-        return max(1, int(os.environ.get("LAUNCH_PASS_MAX", "12")))
+        return max(1, int(os.environ.get("LAUNCH_PASS_MAX", str(default))))
     except ValueError:
-        return 12
+        return default
 
 
 def malformed(w: dict) -> str:
@@ -597,8 +833,9 @@ def take_lease(lock: Path, owner: str) -> bool:
 def apply(repo: Path, plan_arg: str | None) -> int:
     decl = load_declaration(repo)
     if not decl["active"]:
-        print("launch-mode: steady: apply refused, nothing written.")
+        print(f"launch-mode: {decl['mode']}: apply refused, nothing written.")
         return 0
+    polish = decl["mode"] == "polish"
     proj = project(repo)
     if not LEASE_SCRIPT.is_file():
         print(f"ERROR: lease script missing: {LEASE_SCRIPT}. Nothing written.", file=sys.stderr)
@@ -621,7 +858,12 @@ def apply(repo: Path, plan_arg: str | None) -> int:
 
     archive = plan_path.with_suffix(".applied.json")
     plan_path.replace(archive)  # never applied twice; the next pass's write_file sees a new file
-    cap = write_cap()
+    cap = write_cap(decl["mode"])
+    max_creates = MAX_CREATES_POLISH if polish else MAX_CREATES
+    metrics = load_metrics(decl) if polish else None
+    proposed_now: list[dict] = []
+    if metrics is not None:
+        metrics["cycles"] += 1  # one apply in polish mode is one QA cycle, even with zero writes
     entries: list[dict] = []
     if len(writes) > cap:
         entries.append({"op": "cap", "status": "skip", "detail": f"{len(writes)} writes planned, applying the first {cap}"})
@@ -750,8 +992,8 @@ def apply(repo: Path, plan_arg: str | None) -> int:
         title = (w.get("title") or "").strip().lstrip("-").strip()[:200]
         if not title:
             return record(i, w, "skip", "create needs a title")
-        if creates >= MAX_CREATES:
-            return record(i, w, "skip", f"at most {MAX_CREATES} creates per pass")
+        if creates >= max_creates:
+            return record(i, w, "skip", f"at most {max_creates} creates per pass")
         state = w.get("state") or "Backlog"
         pri = (w.get("priority") or "").lower()
         if state not in LANES or (pri and pri not in PRIORITIES):
@@ -762,8 +1004,12 @@ def apply(repo: Path, plan_arg: str | None) -> int:
             return record(i, {**w, "ref": title[:60]}, "skip", f"parent {parent!r} is not a ticket on this board ({ident})")
         wanted = [l.strip() for l in (w.get("labels") or [])]
         labels = [l for l in wanted if label_ok(l)]
-        key = (w.get("key") or "").strip().lstrip("-").strip() or "launch:" + hashlib.sha1(title.lower().encode()).hexdigest()[:12]
-        args = ["task", "create", title, "--state", state, "--idempotency-source", "launch-pass", "--idempotency-key", key]
+        if polish and POLISH_LABEL not in labels:
+            labels.append(POLISH_LABEL)  # every polish create carries the bare-word `polish` label
+        key = (w.get("key") or "").strip().lstrip("-").strip() or \
+            ("polish:" if polish else "launch:") + hashlib.sha1(title.lower().encode()).hexdigest()[:12]
+        source = "polish-pass" if polish else "launch-pass"
+        args = ["task", "create", title, "--state", state, "--idempotency-source", source, "--idempotency-key", key]
         if (w.get("description") or "").strip():
             args.append("--description=" + w["description"])
         if labels:
@@ -780,6 +1026,11 @@ def apply(repo: Path, plan_arg: str | None) -> int:
         dropped = [l for l in wanted if l and l not in labels]
         record(i, {**w, "ref": title[:60]}, "ok" if ok else "error",
                msg + (f" (labels dropped, not bare words or an open axis: {', '.join(dropped)})" if dropped else ""))
+        if ok and polish:
+            board_re = re.escape(ident) if ident else "[A-Z][A-Z0-9]*"
+            mref = re.search(rf"\b({board_re}-\d+)\b", msg)
+            if mref:
+                proposed_now.append({"ref": mref.group(1), "title": title, "at": iso(now())})
         if ok and join_epic:
             board_re = re.escape(ident) if ident else "[A-Z][A-Z0-9]*"
             m = re.search(rf"\b({board_re}-\d+)\b", msg)
@@ -816,6 +1067,34 @@ def apply(repo: Path, plan_arg: str | None) -> int:
         ROADMAP.write_text("\n".join(lines).rstrip() + "\n")
         entries.append({"op": "roadmap", "status": "ok", "detail": str(ROADMAP)})
 
+    dash_ops = plan.get("dashboard")
+    if polish:
+        # The launch dashboard is launch-only: never rendered or published while polishing.
+        if dash_ops:
+            entries.append({"op": "dashboard", "ref": "ops", "status": "skip",
+                            "detail": "the launch dashboard is launch-only: dashboard ops are refused in polish mode"})
+    else:
+        try:
+            mod = dashboard_module()
+            if mod is not None:
+                if dash_ops is not None and not isinstance(dash_ops, list):
+                    entries.append({"op": "dashboard", "ref": "ops", "status": "refused", "detail": "`dashboard` must be a list of ops"})
+                    dash_ops = None
+                entries += mod.run_apply(repo, decl, dash_ops or [])
+        except Exception as e:  # never fatal to the board writes above
+            entries.append({"op": "dashboard", "ref": "apply", "status": "error", "detail": f"{type(e).__name__}: {e}"[:240]})
+
+    if metrics is not None:
+        known = {p.get("ref") for p in metrics["proposed"]}
+        metrics["proposed"] += [p for p in proposed_now if p["ref"] not in known]
+        try:
+            refresh_implemented(metrics, ref_dirs(repo, decl)[2])
+        except Exception:
+            pass  # board unreadable: implemented refreshes on the next pass that reads it
+        save_metrics(metrics)
+        entries.append({"op": "metrics", "ref": "polish", "status": "ok",
+                        "detail": f"QA cycle {metrics['cycles']}: proposed {len(metrics['proposed'])}, implemented {len(metrics['implemented'])} ({METRICS})"})
+
     stamp = f"{now():%Y%m%dT%H%M%SZ}"
     RECEIPTS.mkdir(parents=True, exist_ok=True)
     receipt = RECEIPTS / f"{stamp}.json"
@@ -836,8 +1115,16 @@ def check(repo: Path) -> int:
     return 1 if decl["error"] else 0
 
 
+def metrics_cmd(repo: Path) -> int:
+    decl = load_declaration(repo)
+    m = load_metrics(decl)
+    counts = {"proposed": len(m["proposed"]), "implemented": len(m["implemented"]), "cycles": m["cycles"]}
+    print(json.dumps({**m, "counts": counts}, indent=2))
+    return 0
+
+
 def main(argv: list[str]) -> int:
-    cmds = [a for a in argv[1:] if a in ("--monitor", "--brief", "--apply", "--check")]
+    cmds = [a for a in argv[1:] if a in ("--monitor", "--brief", "--apply", "--check", "--metrics")]
     if len(cmds) != 1:
         print(__doc__)
         return 2
@@ -849,6 +1136,8 @@ def main(argv: list[str]) -> int:
         return brief(repo)
     if cmd == "--check":
         return check(repo)
+    if cmd == "--metrics":
+        return metrics_cmd(repo)
     rest = [a for i, a in enumerate(argv[1:], 1) if a not in ("--apply", "--repo") and argv[i - 1] != "--repo"]
     return apply(repo, rest[0] if rest else None)
 

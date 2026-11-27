@@ -106,7 +106,14 @@ if all(api.values()):
         # The normal support-file branch returns the lexical source path before
         # prerequisite/env capture, usage accounting and preprocessing can run.
         view = json.loads(skill_view(request["skill"], file_path="SKILL.md", preprocess=False))
-        result["skill_view"] = {key: view.get(key) for key in ("success", "_source_path", "error")}
+        source = view.get("_source_path")
+        if view.get("success") and not source:
+            # Newer runtimes stopped echoing the internal ``_source_path`` from a support-file view
+            # (hermes-agent eedf3944e9); the whole-skill view still names the lexical skill directory.
+            whole = json.loads(skill_view(request["skill"], preprocess=False))
+            if whole.get("success") and whole.get("skill_dir"):
+                source = str(Path(whole["skill_dir"]) / "SKILL.md")
+        result["skill_view"] = {"success": view.get("success"), "_source_path": source, "error": view.get("error")}
 print(json.dumps(result))
 '''
 

@@ -254,7 +254,7 @@ BB_PLUGIN_SRC="$HOME/.hermes/plugins/bloodbank-platform"
 BB_PLUGIN_DEST="$PROFILE_HOME/plugins/bloodbank-platform"
 if [[ -L "$BB_PLUGIN_SRC" && ! -e "$BB_PLUGIN_DEST" ]]; then
   mkdir -p "$PROFILE_HOME/plugins"
-  ln -s "$(readlink -f "$BB_PLUGIN_SRC")" "$BB_PLUGIN_DEST"
+  ln -s "$(path_resolve "$BB_PLUGIN_SRC")" "$BB_PLUGIN_DEST"
   log "    linked bloodbank-platform plugin into the profile (restart the gateway to load it)"
 fi
 
@@ -372,6 +372,16 @@ elif [[ ! -f "$PROFILE_MEM_CFG" ]]; then
   log "    pinning compatibility identity-memory bank: agent-$PROFILE_NAME"
   printf '{\n  "bank_id": "agent-%s"\n}\n' "$PROFILE_NAME" > "$PROFILE_MEM_CFG"
   chmod 600 "$PROFILE_MEM_CFG"
+fi
+
+# Name the Hindsight API the desk talks to (config.toml [hindsight] api_url, default
+# https://api.hs.delo.sh). The plugin falls back to the vendor cloud when a desk names none, and
+# that endpoint 401s every key minted here; the URL used to ride in the shared ~/.hermes/.env, which
+# lost it on 2026-11-24 and left ~38 desks memoryless. A hire must never depend on that file.
+if [[ -f "$PROFILE_RENDERER" ]]; then
+  python3 "$PROFILE_RENDERER" memory-endpoint --profile "$PROFILE_NAME" >/dev/null \
+    && log "    recorded the Hindsight API url in the desk's hindsight/config.json" \
+    || die "could not record the Hindsight api_url; run hermes-profile-config.py memory-endpoint --profile $PROFILE_NAME"
 fi
 
 # Name the bank template the identity bank starts from (config.toml

@@ -1,0 +1,1157 @@
+{
+ "schema": "launch-marketplaces/1",
+ "checked": "2026-11-20",
+ "sources": "Official Google Play Console Help, Android developer, App Store Connect Help and Apple Developer documentation, read 2026-11-20. Menu paths are quoted as of that day and the consoles change them: a launch pass confirms them in the live console. Fix a row once in flume and every PM inherits it.",
+ "marketplaces": {
+  "google_play": "Google Play",
+  "app_store": "App Store"
+ },
+ "requirements": [
+  {
+   "id": "gp.developer-account",
+   "marketplace": "google_play",
+   "title": "Play Console developer account exists, fee paid, Developer Distribution Agreement accepted",
+   "applies_when": "always",
+   "why": "Nothing can be published without a Play Console developer account; sign-up is a one-time US$25 fee plus legal acceptance and requires the account holder to be 18+.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console/signup while signed in to the Google Account that will own the app.",
+    "Review and accept the Developer Distribution Agreement.",
+    "Pay the one-time US$25 registration fee with a non-prepaid card (Mastercard, Visa, American Express, Discover US-only, Visa Electron non-US).",
+    "Choose the account type (personal or organization) and complete identity verification (see gp.identity-verification)."
+   ],
+   "verify": "Agent: Play Developer API call with the service account (for example edits.insert on the package) returns 200 instead of 401/403 once the account and app exist; or the owner's Play Console home lists the developer account.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/6112435",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "gp.account-type-organization-duns",
+   "marketplace": "google_play",
+   "title": "Organization account D-U-N-S number (organization accounts only)",
+   "applies_when": "organization account (mandatory for financial, health, VpnService and government apps)",
+   "why": "An organization developer account cannot be created without a valid D-U-N-S number; the legal name and address in the Google payments profile must exactly match the Dun & Bradstreet record or the account risks restrictions and app removal.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Check for an existing D-U-N-S number or apply (free; can take up to 30 days) at https://www.dnb.com/duns/get-a-duns.html (Google warns against paid third-party D-U-N-S services).",
+    "In Play Console sign-up choose Organization and enter the D-U-N-S number when asked (it is read into the Google payments profile).",
+    "Make the payments profile legal name and address match the Dun & Bradstreet profile exactly; fix mismatches before any Google deadline."
+   ],
+   "verify": "Agent cannot see the payments profile. Owner confirms in Play Console > Settings > Developer account (path quoted from Android developer verification guide: 'Settings page ... Developer Account'). Not applicable if the account is personal.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/13634885",
+   "checked": "2026-11-20",
+   "caveat": "Not applicable to personal accounts. Known government bodies and regions Dun & Bradstreet does not cover can ask Google Play support for an alternative."
+  },
+  {
+   "id": "gp.identity-verification",
+   "marketplace": "google_play",
+   "title": "Developer identity verification (government ID, address, OTP-verified contact email, contact phone, developer email)",
+   "applies_when": "always",
+   "why": "Identity verification must be completed before publishing; if Google cannot verify, the developer presence and apps may be removed and cannot be republished until verified. Personal accounts submit a government photo ID and proof of address (US); documents must exactly match the Google payments profile.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console and complete every verification task on the Home page (ID document, address, contact details).",
+    "Use a valid, unexpired, colour, well-lit original government ID whose name and address match the Google payments profile exactly; update the payments profile in the same task if there is a mismatch.",
+    "Verify contact email, contact phone and developer email with the one-time passwords Google sends. Identity and (personal accounts) device verification must be finished before the developer phone / contact phone can be verified.",
+    "Required documents differ by country; the US list is at https://support.google.com/googleplay/android-developer/answer/15633622."
+   ],
+   "verify": "Owner confirms the Home page shows no outstanding verification tasks. Agent has no API for this.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/10841920",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "gp.device-verification",
+   "marketplace": "google_play",
+   "title": "Verify access to a real Android device via the Play Console mobile app",
+   "applies_when": "personal account created after Google's device-verification rollout (new personal accounts)",
+   "why": "New personal-account developers must verify they have a non-rooted physical Android 10+ device with the Play Console mobile app before they can make an app available on Google Play.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console on the web as the account owner and go to Home.",
+    "Find the task 'Verify that you have access to an Android mobile device' and click View details.",
+    "Scan the QR code to install or open the Play Console mobile app on a physical, non-rooted Android 10+ device.",
+    "In the app, sign in as the account owner, select the developer account, tap Verify and follow the prompts (under a minute; the phone number is not collected)."
+   ],
+   "verify": "Owner confirms the Home task disappears. Agent cannot verify.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/10841920",
+   "checked": "2026-11-20",
+   "caveat": "The exact account-creation cutoff for device verification is on https://support.google.com/googleplay/android-developer/answer/14316361 (listed in search results, not fetched)."
+  },
+  {
+   "id": "gp.trader-status",
+   "marketplace": "google_play",
+   "title": "Declare EEA/UK trader or non-trader status for the account",
+   "applies_when": "always",
+   "why": "Google requires every developer account to declare trader status under EEA/UK law; missing the deadline can block app updates and remove apps globally. Traders also self-certify legal compliance, add a terms-of-service link per app and (personal accounts) a public phone number and address.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console, then Manage account > Account details > About you (path quoted from the Trader status declaration help page) and follow the prompts to declare trader or non-trader. A hobbyist with no commercial intent who does not distribute in the EEA/UK may declare non-trader; paid apps, in-app purchases or ads point to trader. Consult a legal professional if unsure.",
+    "If trader: select the app, go to Monitor and improve > Policy and programs > App content and confirm trader status for that app; add the app's terms-of-service link and self-certify."
+   ],
+   "verify": "Owner confirms the declaration shows as complete under Manage account > Account details > About you.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/17594752",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited Play Console Help page as read on 2026-11-20; Play Console menus change and different Help pages show different labels for App content. Deadline 2027-02-01 is for existing accounts; the 2026-10-29 policy announcement also says declaration is required starting November 2026. Scope: Every active developer account; new accounts at creation, existing accounts by 2027-02-01."
+  },
+  {
+   "id": "gp.payments-profile-merchant",
+   "marketplace": "google_play",
+   "title": "Payments profile, bank account and merchant tax information for selling",
+   "applies_when": "app is paid or sells in-app products/subscriptions",
+   "why": "Selling anything on Google Play requires a Google payments profile with legal business info, a bank account registered in the payments profile country, and tax information; bank verification can take up to five days. A free app cannot later become paid.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console, then Manage account > Play apps settings > Monetization settings > Payments profile (path quoted from the Payments profile help page; the same page notes the older 'Setup > Payments profile' route).",
+    "Click Create payments profile, enter legal name, legal address (no PO boxes), primary contact and public business information, then Submit.",
+    "Add and verify a bank account (deposit challenge or bank documents, up to five days) and enter merchant tax information per https://support.google.com/googleplay/android-developer/answer/10463498."
+   ],
+   "verify": "Agent with a Play Developer API service account can read in-app products (inappproducts.list / monetization.onetimeproducts.list) once monetization is enabled; a 403 on those calls suggests the profile is not set up. Owner confirms the payments profile page status.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/7161426",
+   "checked": "2026-11-20",
+   "caveat": "Not applicable to a permanently free app with no in-app products. Japan: the 2026-10-29 announcement says anyone selling into or out of Japan must finish authorisation by 2026-12-01 or payments are held globally."
+  },
+  {
+   "id": "gp.developer-verification-package-registration",
+   "marketplace": "google_play",
+   "title": "Android developer verification: package name registered to the account (and signing-key ownership proven if prompted)",
+   "applies_when": "always",
+   "why": "Android developer verification takes effect 2026-09-30 in Brazil, Indonesia, Singapore and Thailand on certified devices and expands globally in 2027; Play developers must register their package names. For apps created in Play Console the registration is automatic.",
+   "owner_only": false,
+   "agent_path": "Developer APIs for verification launched in August 2026 (see https://developer.android.com/developer-verification); not read in detail. Agent can check the package name and signing certificate it uploads match the Play-registered app via the Play Developer API (edits.apks/bundles upload succeeds) and via bundletool.",
+   "owner_steps": [
+    "Open https://play.google.com/console and look at the Home page for any package-name registration warning (quoted guidance: 'you should check your Play Console Home page').",
+    "If prompted, follow the on-screen prompt to prove ownership of the private signing key for the package.",
+    "Confirm the account identity under Settings > Developer account."
+   ],
+   "verify": "Agent: after the first AAB upload, the app exists in the account so Play auto-registers the package name; owner confirms no registration warning on the Home page.",
+   "doc_url": "https://developer.android.com/developer-verification/guides/google-play-console",
+   "checked": "2026-11-20",
+   "caveat": "Owner steps are only needed if the Home page shows a warning; for new apps created in Play Console Google registers the package automatically. Scope: Distribution on Google Play."
+  },
+  {
+   "id": "gp.create-app",
+   "marketplace": "google_play",
+   "title": "Create the app in Play Console (permanent package name, free/paid choice, policy and export declarations, Play App Signing terms)",
+   "applies_when": "always",
+   "why": "The app record is the container for every other requirement; the package name is permanent and cannot be deleted or reused, and the free/paid choice cannot go from free to paid later.",
+   "owner_only": true,
+   "agent_path": "None: the Play Developer API reference has no create-app method (every endpoint needs an existing package name).",
+   "owner_steps": [
+    "Open https://play.google.com/console and click Create app.",
+    "Enter the app name, default language, App or Game, Free or Paid (a free app cannot be made paid later), and the contact email for users.",
+    "Tick the Developer Program Policies declaration, the US export laws declaration and accept the Play App Signing Terms of Service.",
+    "Click Create app."
+   ],
+   "verify": "Agent: a Play Developer API call with the package name (for example edits.insert then edits.get) succeeds only if the app exists.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9859152",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "gp.target-api-level",
+   "marketplace": "google_play",
+   "title": "Release targets Android 16 (API level 36) or higher",
+   "applies_when": "always",
+   "why": "Since 2026-08-31 new apps and updates must target API 36; the 2026-11-01 extension window has passed.",
+   "owner_only": false,
+   "agent_path": "Inspect the built AAB with bundletool (bundletool dump manifest --bundle=app.aab | grep targetSdkVersion) or aapt2; the Play Developer API edits.bundles.upload / edits.commit also rejects non-compliant uploads.",
+   "owner_steps": [],
+   "verify": "Agent: targetSdkVersion in the AAB manifest is >= 36; Play Console Policy status shows no target-API violation.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/11926878",
+   "checked": "2026-11-20",
+   "caveat": "Scope: Phones/tablets; Wear OS/Automotive: API 35; TV/XR: API 34."
+  },
+  {
+   "id": "gp.aab-upload",
+   "marketplace": "google_play",
+   "title": "Upload a signed Android App Bundle (.aab) with an increasing versionCode",
+   "applies_when": "always",
+   "why": "Google Play builds the delivered APKs from an app bundle; versionCode must rise with each upload and cannot exceed 2100000000.",
+   "owner_only": false,
+   "agent_path": "Play Developer API edits.bundles.upload then edits.tracks.update/patch then edits.commit (service account with release permission).",
+   "owner_steps": [],
+   "verify": "Agent: edits.bundles.list shows the uploaded versionCode; edits.tracks.get shows it on the intended track.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9859348",
+   "checked": "2026-11-20",
+   "caveat": "Scope: APKs are only allowed for apps created before August 2021. The Play App Signing page does not say new apps must use an AAB; the release page says only apps created before August 2021 may use APKs. Ship an AAB."
+  },
+  {
+   "id": "gp.play-app-signing",
+   "marketplace": "google_play",
+   "title": "Play App Signing enrolled and an upload key registered",
+   "applies_when": "always",
+   "why": "New apps are enrolled in Play App Signing when created or on first bundle upload; Google keeps the app signing key and the developer signs bundles with a separate upload key.",
+   "owner_only": false,
+   "agent_path": "Play Developer API appsigning.enrollApp / rotateAppSigningKey exist; the upload keystore stays with the agent's secret store (never in the repo).",
+   "owner_steps": [
+    "Console path per the Play App Signing help page today: Protected with Play > Play Store protection > Manage Play app signing (the page does not mention the older 'Test and release > App integrity')."
+   ],
+   "verify": "Agent: the first AAB upload is accepted and signed by the upload key; Manage Play app signing in the console shows the key fingerprints.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9842756",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited Play Console Help page as read on 2026-11-20; Play Console menus change and different Help pages show different labels for App content. The signing page gives \"Protected with Play > Play Store protection > Manage Play app signing\", not \"Test and release > App integrity\"."
+  },
+  {
+   "id": "gp.native-16kb-page-size",
+   "marketplace": "google_play",
+   "title": "Native code supports 16 KB memory page sizes",
+   "applies_when": "app contains native code (.so libraries, C/C++, Godot/Unity/Unreal engines)",
+   "why": "Apps targeting Android 15+ must support 16 KB page sizes on 64-bit devices; per developer.android.com, from 2027-02-01 updates that do not support it cannot be released. The Play technical-quality page lists it as a bundle requirement with no date.",
+   "owner_only": false,
+   "agent_path": "Run check_elf_alignment.sh <apk> (all arm64-v8a libs must say ALIGNED), zipalign -c -P 16 -v 4 <apk>, and llvm-objdump -p lib.so | grep LOAD (align must be 2**14); AGP >= 8.5.1 and NDK r28+ build aligned by default.",
+   "owner_steps": [],
+   "verify": "Agent: ELF LOAD segment alignment >= 2**14 for every arm64-v8a/x86_64 .so and zipalign 16 KB check passes on the release artifact; bundletool dump config shows PAGE_ALIGNMENT_16K.",
+   "doc_url": "https://developer.android.com/guide/practices/page-sizes",
+   "checked": "2026-11-20",
+   "caveat": "Date discrepancy: developer.android.com says 2027-02-01; the Play Console quality page (answer 17492799) gives no date for mobile. Treat as required now."
+  },
+  {
+   "id": "gp.native-64bit",
+   "marketplace": "google_play",
+   "title": "Native code ships 64-bit libraries",
+   "applies_when": "app contains native code",
+   "why": "The Play technical-quality page says apps with native code must support 64-bit-only architectures.",
+   "owner_only": false,
+   "agent_path": "Inspect lib/ folders in the AAB (unzip -l app.aab | grep '\\.so$') for arm64-v8a (and x86_64).",
+   "owner_steps": [],
+   "verify": "Agent: arm64-v8a libraries present for every native library.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/17492799",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "gp.play-billing-library",
+   "marketplace": "google_play",
+   "title": "Google Play Billing Library version still supported (v8+)",
+   "applies_when": "app sells digital goods or subscriptions through Google Play Billing",
+   "why": "Billing Library 7 hit its new-app/update deadline on 2026-08-31 (extension to 2026-11-01 has passed); use version 8 or newer. Digital goods on Play must use Google Play Billing.",
+   "owner_only": false,
+   "agent_path": "Check the app's build.gradle / merged manifest for com.google.android.play.billingclient.version >= 8.",
+   "owner_steps": [],
+   "verify": "Agent: the merged manifest meta-data com.google.android.play.billingclient.version >= 8.x and Play Console Policy status shows no billing deprecation warning.",
+   "doc_url": "https://developer.android.com/google/play/billing/deprecation-faq",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "gp.closed-test-12-testers-14-days",
+   "marketplace": "google_play",
+   "title": "Closed test: at least 12 testers opted in continuously for 14 days",
+   "applies_when": "personal developer account created after 2023-11-13",
+   "why": "Until met, the Production and Pre-registration tracks stay disabled. A tester who leaves before 14 days does not count; leaving and rejoining needs consecutive 14 days.",
+   "owner_only": true,
+   "agent_path": "Agent can upload the AAB to a closed track and manage the tester list: Play Developer API edits.tracks.update on the closed track and edits.testers (Google Groups). Opt-in counts are shown in the console; the API reference read does not list an opt-in counter.",
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, then Test and release > Testing > Closed testing (path from the Closed testing help page).",
+    "Click Create track (or Manage track), open the Testers tab, add testers by Create email list or Google Groups, add a feedback URL/email, copy the opt-in link and Save changes.",
+    "Create and roll out a release to the closed track (upload the AAB, set release notes, Start rollout). The opt-in link only appears once the app status is Published, and can take several hours after first publish.",
+    "Send the opt-in link to at least 12 testers; each must actively opt in (being on a list is not enough) and stay opted in for 14 consecutive days. Testers who opted into the internal test must opt out of it first.",
+    "Optional: watch feedback under Monitor and improve > Ratings and reviews > Testing feedback."
+   ],
+   "verify": "Agent: edits.tracks.get for the closed track shows a release in 'completed' status; day-count and opted-in tester count are visible to the owner on the Play Console Dashboard (Apply for production becomes available). Agent should track the start date in its ticket and compare to today.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/14151465",
+   "checked": "2026-11-20",
+   "caveat": "Not applicable to personal accounts created before 2023-11-13 or to organization accounts. No Play Developer API field for opted-in testers was seen: the agent tracks the closed-test start date itself and reads the tester count from the console Dashboard."
+  },
+  {
+   "id": "gp.production-access-application",
+   "marketplace": "google_play",
+   "title": "Apply for production access and be approved",
+   "applies_when": "personal developer account created after 2023-11-13 (after the closed test is complete)",
+   "why": "Google reviews the application (usually seven days or less) before Production and Open testing unlock; the account owner receives the result by email.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, and open the Dashboard.",
+    "Click Apply for production.",
+    "Section 1 'About your closed test': how easy recruiting was, how engaged testers were, summary of feedback and how you gathered it. Click Next.",
+    "Section 2 'About your app/game': target audience, value proposition, expected first-year installs. Click Next.",
+    "Section 3 'About your production readiness': changes made from testing and how you decided it is ready. Click Apply (answers are not saved if you leave before Next/Apply).",
+    "Wait for the email to the account owner; Google may ask you to keep testing if you had fewer than 12 opted-in testers or low engagement."
+   ],
+   "verify": "Agent: Test and release > Production becoming enabled; API edits.tracks.update on the production track stops failing with a production-access error.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/14151465",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "gp.privacy-policy",
+   "marketplace": "google_play",
+   "title": "Privacy policy URL on the store listing and in the app",
+   "applies_when": "always",
+   "why": "A publicly reachable privacy policy (https, valid certificate, no login, not a PDF, specific to the app) is required before the Data safety form can be completed.",
+   "owner_only": true,
+   "agent_path": "Agent hosts the page (for example under the repo's site) and curl-verifies status 200 and HTTPS; entering the URL in the console has no API.",
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to Monitor and improve > Policy and programs > App content (path quoted from the help page today).",
+    "Under 'Privacy Policy' choose Start declaration (or Manage), type the policy URL and save."
+   ],
+   "verify": "Agent: curl -sI <policy URL> returns 200 over valid TLS from outside the network; the policy text covers collection, use, sharing and deletion. Owner confirms the App content page row shows complete.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9859455",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited Play Console Help page as read on 2026-11-20; Play Console menus change and different Help pages show different labels for App content. Scope: Even if no personal data is collected."
+  },
+  {
+   "id": "gp.data-safety",
+   "marketplace": "google_play",
+   "title": "Data safety form completed and accurate",
+   "applies_when": "always",
+   "why": "Every app on a test or production track must have a completed Data safety section matching real behaviour including SDK data; misrepresentation can block updates or remove the app.",
+   "owner_only": false,
+   "agent_path": "Play Developer API applications.dataSafety: POST https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{packageName}/dataSafety writes the safety labels (CSV import/export also exists in the console).",
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to App content and under 'Data safety' choose Start.",
+    "Read the overview, Next; answer 'Data collection and security' (collected/shared, encrypted in transit, deletion request), pick data types (including SDKs and libraries), answer usage and handling per type, review the preview and Submit."
+   ],
+   "verify": "Agent: App content shows a green check for Data safety; the declared types match an audit of the app's SDKs and network calls.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/10787469",
+   "checked": "2026-11-20",
+   "caveat": "Owner steps are only needed if the agent cannot use the API path. Scope: Even apps that collect no data."
+  },
+  {
+   "id": "gp.content-rating",
+   "marketplace": "google_play",
+   "title": "IARC content rating questionnaire submitted",
+   "applies_when": "always",
+   "why": "New apps must complete the content-rating questionnaire; ratings are used to block or filter content and inaccurate answers can remove the app.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to Policy > App content (path quoted from the Content ratings help page; other pages say Monitor and improve > Policy and programs > App content).",
+    "Under Content rating click Start, enter an email address for IARC correspondence, choose a category (game vs app) and click Next.",
+    "Answer every question, review the calculated ratings on the Summary page and click Submit."
+   ],
+   "verify": "Owner confirms Content rating shows a rating on the App content page. Agent can pre-answer the questions in a ticket from the game's actual content.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9859655",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited Play Console Help page as read on 2026-11-20; Play Console menus change and different Help pages show different labels for App content. Play Console menu labels disagree across Help pages (Policy > App content, or Monitor and improve > Policy and programs > App content): confirm in the live console."
+  },
+  {
+   "id": "gp.target-audience-and-content",
+   "marketplace": "google_play",
+   "title": "Target audience and content declared",
+   "applies_when": "always",
+   "why": "Declares age groups and drives Families Policy; the store listing must not use child-appealing marketing if the app is not child-directed. Requires ads declaration, app access and privacy policy to be done first.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to Policy > App content > Target audience and content > Start (or Manage).",
+    "Pick the target age groups (choose several only if truly designed for each), answer the app-details and ads follow-ups, review the summary and click Save."
+   ],
+   "verify": "Owner confirms the row is complete on the App content page.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9867159",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited Play Console Help page as read on 2026-11-20; Play Console menus change and different Help pages show different labels for App content."
+  },
+  {
+   "id": "gp.families-policy",
+   "marketplace": "google_play",
+   "title": "Families Policy requirements (child-safe ad SDKs, neutral age screen, children's data rules)",
+   "applies_when": "target audience includes children (ages under 13, or under 18 in some locales)",
+   "why": "Apps whose target ages include children must use only Families Self-Certified Ads SDKs and follow Families Policy; mixed audiences need a neutral age screen.",
+   "owner_only": false,
+   "agent_path": "Agent audits SDK list against the Families Self-Certified Ads SDK list and checks the app for a neutral age screen.",
+   "owner_steps": [],
+   "verify": "Agent: no non-certified ad SDK or AD_ID request in a children-targeted build; Target audience declared consistently with the listing.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9867159",
+   "checked": "2026-11-20",
+   "caveat": "Not applicable if the declared audience is adults/13+ only and the listing has no child-appealing marketing."
+  },
+  {
+   "id": "gp.ads-declaration",
+   "marketplace": "google_play",
+   "title": "Ads declaration (contains ads yes/no)",
+   "applies_when": "always",
+   "why": "The declaration drives the 'Contains ads' label; misrepresenting ad presence can suspend the app.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to Monitor and improve > Policy and programs > App content.",
+    "In the 'Ads' section click Start declaration (or Manage), choose Yes or No after reading the Ads policy, and save."
+   ],
+   "verify": "Owner confirms the Ads row is complete; agent verifies the build contains or lacks ad SDKs consistent with the answer.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9859455",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited Play Console Help page as read on 2026-11-20; Play Console menus change and different Help pages show different labels for App content."
+  },
+  {
+   "id": "gp.app-access",
+   "marketplace": "google_play",
+   "title": "App access (sign-in) instructions for reviewers",
+   "applies_when": "always",
+   "why": "Reviewers must be able to reach all functionality; credentials must be reusable, valid from anywhere, in English, and bypass 2FA/OTP.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to Monitor and improve > Policy and programs > App content.",
+    "In 'Sign-in details' click Start declaration (or Manage), then + Add new instructions and enter the demo credentials or steps (up to five sets); put OTP/MFA workarounds in 'Any other instructions'; save."
+   ],
+   "verify": "Agent: the demo account in the instructions actually logs in against the production backend from a clean install.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9859455",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited Play Console Help page as read on 2026-11-20; Play Console menus change and different Help pages show different labels for App content. Scope: Declare all functionality available, or provide credentials/instructions when any part is gated by login, membership, paywall or location. Play Console menu labels disagree across Help pages (Policy > App content, or Monitor and improve > Policy and programs > App content): confirm in the live console."
+  },
+  {
+   "id": "gp.account-deletion",
+   "marketplace": "google_play",
+   "title": "Account deletion: in-app path plus a public web deletion page, declared in Data safety",
+   "applies_when": "app lets users create an account (in the app or via an external flow)",
+   "why": "Apps with account creation must offer in-app deletion and a web link usable without the app; the URL is entered in the Data safety deletion questions and the page must load, name the app/developer and let users request deletion.",
+   "owner_only": false,
+   "agent_path": "Agent builds the in-app deletion flow and web page; curl-verifies the URL; data safety deletion fields can be set through the dataSafety API.",
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to App content > Data safety and answer the Data deletion questions, entering the web deletion URL."
+   ],
+   "verify": "Agent: the web deletion URL returns 200, names the app/developer and exposes a request mechanism; in-app Settings has a prominent delete-account action that removes the account and associated data.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/13327111",
+   "checked": "2026-11-20",
+   "caveat": "Not applicable to apps with no accounts (for example local-only play)."
+  },
+  {
+   "id": "gp.financial-features-declaration",
+   "marketplace": "google_play",
+   "title": "Financial features declaration",
+   "applies_when": "always",
+   "why": "Every developer with a published app must complete it, even with no financial features.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to App content (Policy and programs > App content).",
+    "In 'Financial features' select Start, choose 'My app doesn't provide any financial features', click Next, then Save."
+   ],
+   "verify": "Owner confirms the row is complete on App content / Policy status.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/13849271",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited Play Console Help page as read on 2026-11-20; Play Console menus change and different Help pages show different labels for App content. Scope: Apps with no financial features must still certify that."
+  },
+  {
+   "id": "gp.health-apps-declaration",
+   "marketplace": "google_play",
+   "title": "Health apps declaration",
+   "applies_when": "always",
+   "why": "The Health apps declaration form must be completed by all developers per Play Console Help; categories include activity and fitness, period tracking, medical device apps and human-subjects research.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to App content and complete the 'Health apps' declaration (choose the option that the app has no health features if true). Quote from help page today: path not stated in the page read; see https://support.google.com/googleplay/android-developer/answer/14738291."
+   ],
+   "verify": "Owner confirms the row is complete on App content.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/14738291",
+   "checked": "2026-11-20",
+   "caveat": "Only the search summary of this page was read, not the full article; exact steps unverified. Scope: All apps, even with no health features."
+  },
+  {
+   "id": "gp.government-apps-declaration",
+   "marketplace": "google_play",
+   "title": "Government apps declaration",
+   "applies_when": "always",
+   "why": "The Government apps declaration has been required on the App content page since 2023-01-31.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to App content and complete the 'Government apps' declaration. Only the search summary of this page was read; exact steps are on https://support.google.com/googleplay/android-developer/answer/9514050."
+   ],
+   "verify": "Owner confirms the row is complete on App content.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9514050",
+   "checked": "2026-11-20",
+   "caveat": "Only the search summary of this page was read. Scope: Declare the app is not a government app."
+  },
+  {
+   "id": "gp.advertising-id-declaration",
+   "marketplace": "google_play",
+   "title": "Advertising ID declaration",
+   "applies_when": "always",
+   "why": "Listed among the App content declarations; the Android advertising ID may only be used for advertising and user analytics.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to App content and complete 'Advertising ID' (Start). Exact page steps not fetched."
+   ],
+   "verify": "Agent: merged manifest contains or omits com.google.android.gms.permission.AD_ID consistently with the declaration.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9857753",
+   "checked": "2026-11-20",
+   "caveat": "Policy page read describes the Ads policy, not the declaration steps; the declaration is named in the Prepare-your-app-for-review search result. Verify steps in console. Scope: Declare whether the app uses the advertising ID; apps solely targeting children must not request AD_ID at API 33+."
+  },
+  {
+   "id": "gp.sensitive-permissions-declarations",
+   "marketplace": "google_play",
+   "title": "Permission declaration forms for sensitive permissions",
+   "applies_when": "app requests sensitive permissions (SMS, call log, background location, all-files access, photo/video, fine location for API 37+, local network for API 37+, manage contacts)",
+   "why": "Apps requesting sensitive permissions may need a declaration form before the release can be published; the 2026-10-29 announcement adds local-network, manage-contacts and fine-location declarations.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to App content and complete each permission declaration listed there; if a release errors on a permission, follow the link in the Preview and confirm screen."
+   ],
+   "verify": "Agent: list requested permissions from the merged manifest; none sensitive means not applicable.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/18100766",
+   "checked": "2026-11-20",
+   "caveat": "Conditional; most games request none. Location permission declarations become mandatory 2027-01-27; fine location needs a declaration only for API 37+ (not a targetSdk 36 build)."
+  },
+  {
+   "id": "gp.news-app-declaration",
+   "marketplace": "google_play",
+   "title": "News and magazine app self-declaration",
+   "applies_when": "app is a news or magazine app",
+   "why": "All News & Magazine apps must declare themselves in Play Console.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to App content and complete the News apps declaration."
+   ],
+   "verify": "Agent: not applicable unless the app is a news/magazine app.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/18265346",
+   "checked": "2026-11-20",
+   "caveat": "Not applicable to games."
+  },
+  {
+   "id": "gp.store-listing-text",
+   "marketplace": "google_play",
+   "title": "Store listing text: app name (30), short description (80), full description (4000)",
+   "applies_when": "always",
+   "why": "Title, short description and full description are required to publish; repetitive or irrelevant keywords can cause suspension.",
+   "owner_only": false,
+   "agent_path": "Play Developer API edits.listings.update/patch per language, then edits.commit.",
+   "owner_steps": [
+    "Console path from the help page today: Grow users > Store presence > Store listings (or Main store listing)."
+   ],
+   "verify": "Agent: edits.listings.get returns title <=30, shortDescription <=80, fullDescription <=4000 for the default language.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9859152",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited Play Console Help page as read on 2026-11-20; Play Console menus change and different Help pages show different labels for App content."
+  },
+  {
+   "id": "gp.store-listing-icon",
+   "marketplace": "google_play",
+   "title": "App icon 512x512 32-bit PNG with alpha, up to 1024 KB",
+   "applies_when": "always",
+   "why": "The Play icon is required to publish and must not carry badges or text implying ranking, price or categories.",
+   "owner_only": false,
+   "agent_path": "Play Developer API edits.images.upload with imageType icon.",
+   "owner_steps": [],
+   "verify": "Agent: edits.images.list(imageType=icon) returns an image; file is 512x512 PNG <=1024 KB.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9866151",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "gp.store-listing-feature-graphic",
+   "marketplace": "google_play",
+   "title": "Feature graphic 1024x500 JPEG or 24-bit PNG, no alpha",
+   "applies_when": "always",
+   "why": "The feature graphic is required to publish.",
+   "owner_only": false,
+   "agent_path": "Play Developer API edits.images.upload with imageType featureGraphic.",
+   "owner_steps": [],
+   "verify": "Agent: edits.images.list(imageType=featureGraphic) returns an image of 1024x500 without alpha.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9866151",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "gp.store-listing-screenshots",
+   "marketplace": "google_play",
+   "title": "Phone screenshots (2 to 8; JPEG/24-bit PNG, 320-3840 px per side, long side at most 2.3x short side, up to 8 MB)",
+   "applies_when": "always",
+   "why": "At least two screenshots across device types are required to publish; 4+ at 1080 px or larger are recommended for promotional eligibility.",
+   "owner_only": false,
+   "agent_path": "Play Developer API edits.images.upload with imageType phoneScreenshots (and sevenInchScreenshots/tenInchScreenshots if targeted).",
+   "owner_steps": [],
+   "verify": "Agent: edits.images.list(imageType=phoneScreenshots) returns 2-8 images in valid size/ratio.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9866151",
+   "checked": "2026-11-20",
+   "caveat": "The help page lists tablet minimums (4) under the same heading as promotion eligibility; confirm in console whether tablet shots are required for your device targeting. Scope: Tablet/Chromebook/foldable/Wear/TV/XR sets only if targeting those form factors."
+  },
+  {
+   "id": "gp.store-category-contact",
+   "marketplace": "google_play",
+   "title": "Category, tags and contact email (phone/website optional) set",
+   "applies_when": "always",
+   "why": "Category, tags and a contact email are part of the mandatory store settings; a website is recommended.",
+   "owner_only": false,
+   "agent_path": "Play Developer API edits.details.update (contactEmail, contactWebsite, defaultLanguage) for contact info; category is set in the console.",
+   "owner_steps": [
+    "Console path from the help page: Store settings then 'Contact Details'; category under Grow users > Store presence > Store listings."
+   ],
+   "verify": "Agent: edits.details.get returns contactEmail.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9859152",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited Play Console Help page as read on 2026-11-20; Play Console menus change and different Help pages show different labels for App content."
+  },
+  {
+   "id": "gp.pricing-free-or-paid",
+   "marketplace": "google_play",
+   "title": "Pricing and distribution: free vs paid and countries/regions",
+   "applies_when": "always",
+   "why": "Free/paid is permanent in one direction (free apps cannot become paid); the first production rollout publishes to the chosen countries or regions.",
+   "owner_only": true,
+   "agent_path": "Agent can read country availability (edits.countryavailability.get); price changes for paid apps are console-only per the reference read.",
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to Products > App pricing (path from the Set up your app's prices help page) and confirm Free/Paid; choose countries/regions on the production release."
+   ],
+   "verify": "Agent: edits.countryavailability.get lists the intended countries.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/6334373",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited Play Console Help page as read on 2026-11-20; Play Console menus change and different Help pages show different labels for App content."
+  },
+  {
+   "id": "gp.production-release",
+   "marketplace": "google_play",
+   "title": "Create and roll out the production release; send changes for review",
+   "applies_when": "always",
+   "why": "A launch on Google Play means rolling out a release to the production track; changes needing review go through Publishing overview and Send for review. Managed publishing cannot be used for the first publication; reviews can take from a few hours to seven days or longer.",
+   "owner_only": true,
+   "agent_path": "Play Developer API: edits.bundles.upload, edits.tracks.update (production release, status completed), edits.validate then edits.commit; the owner (or an owner-delegated service account) clicks final send. Commit fails while declarations are incomplete.",
+   "owner_steps": [
+    "Open https://play.google.com/console, choose the app, go to Test and release > Production and click Create new release (top right).",
+    "Upload the AAB (or Add from library), name the release, and enter release notes per language wrapped in tags such as <en-US>...</en-US> (500 characters each); click Next.",
+    "On 'Preview and confirm' fix every error (warnings do not block), then click Save (or Publish if offered).",
+    "Open Publishing overview in the main menu and click Send for review under 'Changes not yet sent for review'; critical pre-review-check issues must be fixed first.",
+    "For a first release there is no rollout percentage: click Start rollout to production.",
+    "Track status under Test and release > Latest releases and bundles; allow at least a week between submitting and going live."
+   ],
+   "verify": "Agent: edits.tracks.get for production shows the release 'completed'; the Play Console Publishing overview shows no pending changes and the store URL https://play.google.com/store/apps/details?id=<package> returns the listing.",
+   "doc_url": "https://support.google.com/googleplay/android-developer/answer/9859348",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "as.developer-program-membership",
+   "marketplace": "app_store",
+   "title": "Apple Developer Program membership active (US$99 per year), Apple Account with two-factor authentication",
+   "applies_when": "always",
+   "why": "Membership is the prerequisite for App Store Connect; the legal name on the Apple Account becomes the seller name and an alias or company name in the Apple Account delays approval.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://developer.apple.com/programs/enroll/ and click Start your enrollment (or use the Apple Developer app).",
+    "Sign in with an Apple Account that has two-factor authentication on and legal first and last names.",
+    "Individual: confirm legal name, email, phone and address (no PO boxes). Organization: have legal binding authority and a D-U-N-S number; your organization email/website must be public and functional (see as.duns-organization).",
+    "Agree to the Apple Developer Program License Agreement and pay US$99 (fee waivers exist for nonprofits, accredited educational institutions and government entities)."
+   ],
+   "verify": "Agent: an App Store Connect API call with the team's API key (for example GET https://api.appstoreconnect.apple.com/v1/apps) returns 200.",
+   "doc_url": "https://developer.apple.com/programs/enroll/",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "as.duns-organization",
+   "marketplace": "app_store",
+   "title": "Organization enrollment: D-U-N-S number and legal entity verification",
+   "applies_when": "organization account (not individual/sole proprietor)",
+   "why": "Apple verifies identity, legal entity status and address through the nine-digit D-U-N-S number; DBAs, fictitious names, trade names and branches are not accepted and the website must be public and functional.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Look up or request a D-U-N-S number at https://developer.apple.com/support/D-U-N-S/.",
+    "During enrollment at https://developer.apple.com/programs/enroll/ enter the legal entity name, D-U-N-S, work email on the organization's domain, phone and a public website."
+   ],
+   "verify": "Owner confirms enrollment status in the Apple Developer account. Not applicable for individual accounts.",
+   "doc_url": "https://developer.apple.com/programs/enroll/",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "as.accept-latest-agreements",
+   "marketplace": "app_store",
+   "title": "Account Holder has accepted the latest agreements in App Store Connect Business",
+   "applies_when": "always",
+   "why": "Apps cannot be created until the Account Holder signs the latest agreements; a new agreement version blocks creating apps until accepted.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://appstoreconnect.apple.com and click Business at the top of the page.",
+    "On the Agreements tab, click View and Agree to Terms on any row that asks for acceptance, read and click Agree (two-factor code may be requested)."
+   ],
+   "verify": "Owner confirms Business > Agreements shows no pending agreement. Agent: app creation or an App Store Connect API write fails until accepted.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/manage-agreements/sign-and-update-agreements/",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited App Store Connect Help page as read on 2026-11-20; App Store Connect menus change."
+  },
+  {
+   "id": "as.paid-apps-agreement-tax-banking",
+   "marketplace": "app_store",
+   "title": "Paid Apps Agreement active with tax forms and bank account",
+   "applies_when": "app is paid or sells In-App Purchases/subscriptions",
+   "why": "Selling anything requires the Account Holder to sign the Paid Apps Agreement, then submit tax forms, then add a bank account; status must be Active. A free app with no IAP needs none of this.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://appstoreconnect.apple.com, click Business, on the Agreements tab find the Paid Apps row and click View and Agree to Terms, read and click Agree (irreversible).",
+    "In the Tax Forms section click Add Tax Info next to the form you need (US developers complete a W-9; other regions have their own forms).",
+    "In the Bank Accounts section click Add Bank Account, choose the bank's country or region and fill the required fields.",
+    "Wait until the Paid Apps row shows Active."
+   ],
+   "verify": "Agent: IAP/subscription products can be created and tested in sandbox only when the agreement is Active; the App Store Connect Business page row shows Active (owner confirms).",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/manage-agreements/sign-and-update-agreements/",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited App Store Connect Help page as read on 2026-11-20; App Store Connect menus change. Section was renamed Business (previously Agreements, Tax, and Banking)."
+  },
+  {
+   "id": "as.dsa-trader-status",
+   "marketplace": "app_store",
+   "title": "EU Digital Services Act trader status declared (account level, plus per-app if trader)",
+   "applies_when": "always",
+   "why": "Apple requires trader status to submit apps for the EU storefronts; traders must give address, phone, email and business documents which become public on the EU product page; non-traders are shown as not subject to EU consumer rights.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Open https://appstoreconnect.apple.com, select Business at the top, on the Agreements tab scroll to Compliance and next to Digital Services Act click Complete Compliance Requirements (Account Holder or Admin).",
+    "Choose 'This is a trader account.' or 'This is not a trader account.'; if trader, enter and confirm contact information, validate email and phone with two-factor codes, upload a current document verifying business name and address, then Next and Confirm.",
+    "Per app (traders): Apps > select app > General > App Compliance > Digital Services Act > Edit."
+   ],
+   "verify": "Owner confirms the Compliance section shows the DSA row complete. App Store Connect prompts for trader status at the next new-app submission if it is not declared.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/manage-compliance-information/manage-european-union-digital-services-act-trader-requirements",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited App Store Connect Help page as read on 2026-11-20; App Store Connect menus change. Scope: Every developer declares; self-assessed trader or non-trader. No App Store Connect API endpoint for DSA trader status was found, so this stays an owner step."
+  },
+  {
+   "id": "as.bundle-id-and-app-record",
+   "marketplace": "app_store",
+   "title": "Bundle ID registered and App Store Connect app record created",
+   "applies_when": "always",
+   "why": "The app record is created before any build is uploaded; the bundle ID cannot change after a build is uploaded and the SKU cannot change after creation.",
+   "owner_only": true,
+   "agent_path": "Bundle IDs can be registered with the App Store Connect API (POST /v1/bundleIds, not re-read here); the Help page does not say the API can create the app record, so creation is a console action.",
+   "owner_steps": [
+    "Register the bundle ID under Identifiers at https://developer.apple.com/account/resources/identifiers/list (Certificates, Identifiers & Profiles).",
+    "Open https://appstoreconnect.apple.com, go to Apps, click the + button at top left and choose New App.",
+    "Select platforms, enter App name, Primary language, Bundle ID, SKU and User Access (Full or Limited), then click Create (role: Account Holder, Admin or App Manager)."
+   ],
+   "verify": "Agent: GET /v1/apps?filter[bundleId]=<id> returns the app.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/create-an-app-record/add-a-new-app",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited App Store Connect Help page as read on 2026-11-20; App Store Connect menus change."
+  },
+  {
+   "id": "as.xcode-26-sdk",
+   "marketplace": "app_store",
+   "title": "Build uploaded with Xcode 26+ and the iOS 26 SDK",
+   "applies_when": "always",
+   "why": "Since 2026-04-28 uploads must be built with Xcode 26 or later using the 26-series SDKs.",
+   "owner_only": false,
+   "agent_path": "Check the build's Info.plist DTXcode / DTPlatformVersion / DTSDKName values in the IPA and the build record in App Store Connect API (GET /v1/builds).",
+   "owner_steps": [],
+   "verify": "Agent: DTSDKName in the IPA Info.plist starts with iphoneos26 and App Store Connect accepts the upload without ITMS errors.",
+   "doc_url": "https://developer.apple.com/news/upcoming-requirements/",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "as.min-deployment-ios13",
+   "marketplace": "app_store",
+   "title": "iOS/iPadOS minimum deployment target is iOS 13 or later",
+   "applies_when": "always",
+   "why": "The Upcoming Requirements page lists 'iOS and iPadOS apps must target iOS 13 or later' dated 2026-09-09 under items that block submission or upload.",
+   "owner_only": false,
+   "agent_path": "Read MinimumOSVersion from the IPA Info.plist.",
+   "owner_steps": [],
+   "verify": "Agent: MinimumOSVersion >= 13.0.",
+   "doc_url": "https://developer.apple.com/news/upcoming-requirements/",
+   "checked": "2026-11-20",
+   "caveat": "Quoted as the page states it; the practical floor of a modern game is far above 13."
+  },
+  {
+   "id": "as.privacy-manifest-required-reason-apis",
+   "marketplace": "app_store",
+   "title": "Privacy manifest with approved reasons for required-reason APIs (including third-party SDKs)",
+   "applies_when": "always",
+   "why": "Since 2024-05-01 approved reasons are required for required-reason APIs including those used by SDKs.",
+   "owner_only": false,
+   "agent_path": "Inspect PrivacyInfo.xcprivacy in the app and every embedded framework; App Store Connect emails ITMS-91053 style issues after upload.",
+   "owner_steps": [],
+   "verify": "Agent: PrivacyInfo.xcprivacy present for the app and each SDK that needs one; upload processed with no required-reason warnings.",
+   "doc_url": "https://developer.apple.com/news/upcoming-requirements/",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "as.build-uploaded-and-attached",
+   "marketplace": "app_store",
+   "title": "Build uploaded, processed, and attached to the version",
+   "applies_when": "always",
+   "why": "Only one build can be associated with a version and it must be chosen before Submit for Review; a build in 'Missing Compliance' blocks submission until export-compliance questions are answered.",
+   "owner_only": false,
+   "agent_path": "App Store Connect API: GET /v1/builds?filter[app]=<id>, then PATCH /v1/appStoreVersions/{id}/relationships/build; the repo's mobile-deploy-hub performs upload.",
+   "owner_steps": [
+    "Console path: Apps > select the app > click the version in the sidebar > Build section > + > select the build > Done > Save (role: Account Holder, Admin or App Manager)."
+   ],
+   "verify": "Agent: the appStoreVersion's build relationship is set and the build processingState is VALID.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/manage-builds/choose-a-build-to-submit",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited App Store Connect Help page as read on 2026-11-20; App Store Connect menus change."
+  },
+  {
+   "id": "as.export-compliance",
+   "marketplace": "app_store",
+   "title": "Export compliance answered for the build (ITSAppUsesNonExemptEncryption)",
+   "applies_when": "always",
+   "why": "Apps using encryption must answer export questions per build or set the Info.plist key once; a 'Missing Compliance' build cannot be submitted. Documentation may be needed for non-exempt encryption (and France controls apply when distributing there).",
+   "owner_only": false,
+   "agent_path": "Set ITSAppUsesNonExemptEncryption in Info.plist at build time; App Store Connect API appEncryptionDeclarations resources exist.",
+   "owner_steps": [
+    "If asked in console: Apps > app > version > Build > Manage next to the build and answer the encryption questions."
+   ],
+   "verify": "Agent: the Info.plist key is present in the IPA and the build shows no 'Missing Compliance'.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/manage-app-information/overview-of-export-compliance",
+   "checked": "2026-11-20",
+   "caveat": "The page does not name the Info.plist key; ITSAppUsesNonExemptEncryption comes from Apple's linked documentation and general knowledge."
+  },
+  {
+   "id": "as.app-privacy-details",
+   "marketplace": "app_store",
+   "title": "App Privacy data-collection answers published",
+   "applies_when": "always",
+   "why": "Apps must publish data-handling disclosures including third-party SDK collection; the product page cannot go live without it.",
+   "owner_only": true,
+   "agent_path": "No App Store Connect API endpoint for App Privacy data usages was found in the API documentation index read (app-metadata topics list app-infos, localizations, versions, screenshots, age-ratings, categories, accessibility-declarations only). Fastlane-style private endpoints exist but are unofficial.",
+   "owner_steps": [
+    "Open https://appstoreconnect.apple.com, Apps > select the app > sidebar: App Privacy (role: Account Holder, Admin or App Manager).",
+    "Click Get Started; choose 'No, we do not collect data from this app' and Save, or choose Yes and select every data type collected by you and third-party partners, then answer the follow-ups for each type.",
+    "Review the Product Page Preview and click Publish (top right), confirming accuracy."
+   ],
+   "verify": "Owner confirms the App Privacy page shows Published.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited App Store Connect Help page as read on 2026-11-20; App Store Connect menus change. Scope: Even 'no data collected'. No App Store Connect API endpoint for App Privacy was found (only unofficial private endpoints), so this stays an owner step."
+  },
+  {
+   "id": "as.privacy-policy-url",
+   "marketplace": "app_store",
+   "title": "Privacy policy URL in App Store Connect and a link inside the app",
+   "applies_when": "always",
+   "why": "A privacy policy URL is required for all iOS apps and Guideline 5.1.1(i) requires the link in the metadata and inside the app.",
+   "owner_only": false,
+   "agent_path": "App Store Connect API: appInfoLocalizations privacyPolicyUrl (resource page exists in the API index); agent hosts and curl-checks the page.",
+   "owner_steps": [
+    "Console: Apps > app > App Privacy > next to Privacy Policy click Edit, enter the URL (and optional Privacy Choices URL), Save."
+   ],
+   "verify": "Agent: curl -sI <url> returns 200; the app has a reachable link; appInfoLocalizations shows the URL.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited App Store Connect Help page as read on 2026-11-20; App Store Connect menus change."
+  },
+  {
+   "id": "as.age-rating",
+   "marketplace": "app_store",
+   "title": "Age rating questionnaire answered (updated 2026 questions)",
+   "applies_when": "always",
+   "why": "The age rating is a required app information property; unrated apps cannot be published. Apple asked developers to answer the updated questions by 2026-01-31 to avoid interrupted submissions.",
+   "owner_only": false,
+   "agent_path": "App Store Connect API 'age-ratings' resources (ageRatingDeclarations) exist under Managing Categories and Age Declarations.",
+   "owner_steps": [
+    "Console: Apps > app > sidebar General > App Information > Age Ratings > Set Up Age Ratings.",
+    "Select in-app controls and capabilities, choose a frequency for each content description, Next, then under 'Age Categories and Override' choose Not Applicable, Made for Kids or Override to Higher Age Rating; Save."
+   ],
+   "verify": "Agent: the ageRatingDeclaration for the appInfo has no null questions; App Information shows a calculated rating.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/manage-app-information/set-an-app-age-rating",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited App Store Connect Help page as read on 2026-11-20; App Store Connect menus change."
+  },
+  {
+   "id": "as.age-assurance-regional",
+   "marketplace": "app_store",
+   "title": "Age-assurance obligations (Declared Age Range API etc.) for covered regions",
+   "applies_when": "app rated 18+ or distributed in Brazil, Australia, Singapore, Utah or Louisiana (and Texas if enforced)",
+   "why": "Apple blocks 18+ downloads in Australia, Brazil and Singapore for unconfirmed adults automatically; developers may have separate legal obligations. Apple states it does not block submission.",
+   "owner_only": false,
+   "agent_path": "Implement the Declared Age Range API (iOS 26+) if legal obligations apply.",
+   "owner_steps": [],
+   "verify": "Agent: a documented decision per region; no App Review gate exists per the Apple news posts read.",
+   "doc_url": "https://developer.apple.com/news/?id=f5zj08ey",
+   "checked": "2026-11-20",
+   "caveat": "Texas SB2420: Apple paused implementation after an injunction (2025-12-23 post), a search summary says the injunction was later lifted with a June 4, 2026 start; the Utah HB 498 deadline claim (2027-05-06) is unverified. Needs legal judgement, not a store gate."
+  },
+  {
+   "id": "as.categories-content-rights",
+   "marketplace": "app_store",
+   "title": "Primary category and Content Rights declaration",
+   "applies_when": "always",
+   "why": "Primary category and the content-rights answer (third-party content) are part of App Information; Games needs a subcategory choice of one or two.",
+   "owner_only": false,
+   "agent_path": "App Store Connect API app-categories and app-infos resources.",
+   "owner_steps": [
+    "Console: Apps > app > General > App Information > set Primary Category (and optional secondary/subcategories) and answer Content Rights."
+   ],
+   "verify": "Agent: appInfo primaryCategory is set; content rights declared.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/reference/app-information/app-information",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited App Store Connect Help page as read on 2026-11-20; App Store Connect menus change."
+  },
+  {
+   "id": "as.pricing-and-availability",
+   "marketplace": "app_store",
+   "title": "Price set (free is a price) and availability chosen",
+   "applies_when": "always",
+   "why": "Pricing must be set before submitting for review; the Account Holder must have accepted the Paid Apps Agreement to offer anything but free.",
+   "owner_only": false,
+   "agent_path": "App Store Connect API POST /v1/appPriceSchedules (base territory + price point) and app availability resources.",
+   "owner_steps": [
+    "Console: Apps > app > sidebar Monetization > Pricing and Availability > Price Schedule > Add Pricing; select base country or region, choose a price, Next, review per-storefront prices, Next, then Confirm (role: Account Holder, Admin or App Manager)."
+   ],
+   "verify": "Agent: GET /v1/apps/{id}/appPriceSchedule returns a schedule; availability lists the intended territories.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/manage-app-pricing/set-a-price/",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited App Store Connect Help page as read on 2026-11-20; App Store Connect menus change."
+  },
+  {
+   "id": "as.version-metadata-text",
+   "marketplace": "app_store",
+   "title": "Version metadata: description (4000), keywords (100 bytes), copyright, name (2-30), subtitle (30), promotional text (170)",
+   "applies_when": "always",
+   "why": "Description, keywords, support URL and copyright are explicitly required for submission; name is 2-30 characters; What's New is required only from the second version.",
+   "owner_only": false,
+   "agent_path": "App Store Connect API appStoreVersionLocalizations (description, keywords, whatsNew, supportUrl, promotionalText) and appInfoLocalizations (name, subtitle).",
+   "owner_steps": [],
+   "verify": "Agent: all required localization fields non-empty and within limits for the primary language.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information",
+   "checked": "2026-11-20",
+   "caveat": "Required/optional column read from the page text; the separate Required-properties page lost its check marks in conversion, so the 'required' status of each field rests on the Platform version information page."
+  },
+  {
+   "id": "as.support-url",
+   "marketplace": "app_store",
+   "title": "Support URL (and optional marketing URL) live and working",
+   "applies_when": "always",
+   "why": "Support URL is required with full protocol; Guideline 2.1 rejects placeholder or dead URLs.",
+   "owner_only": false,
+   "agent_path": "Agent hosts the page and curl-verifies; set through appStoreVersionLocalizations supportUrl.",
+   "owner_steps": [],
+   "verify": "Agent: curl -sI <support URL> returns 200 with real contact content.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "as.screenshots",
+   "marketplace": "app_store",
+   "title": "Screenshots: iPhone 'Dynamic Island (medium)' 1179x2556 or 1206x2622, iPad 13in 2064x2752 or 2048x2732 if the app runs on iPad",
+   "applies_when": "always",
+   "why": "At least one screenshot (up to ten) per required display size, JPEG/PNG with no alpha; other sizes scale from these.",
+   "owner_only": false,
+   "agent_path": "App Store Connect API appScreenshotSets / appScreenshots (reserve, upload operations, then mark uploaded with checksum).",
+   "owner_steps": [],
+   "verify": "Agent: appScreenshotSets for the required display types each have >=1 appScreenshot with state COMPLETE.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications",
+   "checked": "2026-11-20",
+   "caveat": "The page also states iPhone Duo screenshots become required from April 2027 for apps using the iOS 27.1 SDK or later (not applicable now). Scope: IPad set only if the app supports iPadOS."
+  },
+  {
+   "id": "as.app-icon-1024",
+   "marketplace": "app_store",
+   "title": "1024x1024 App Store icon in the app's asset catalog",
+   "applies_when": "always",
+   "why": "Without the 1024x1024 PNG in the asset catalog the build is rejected at upload (ITMS-90704) and cannot be submitted.",
+   "owner_only": false,
+   "agent_path": "Inspect the Xcode asset catalog / export preset for the 1024 icon; upload validation fails otherwise.",
+   "owner_steps": [],
+   "verify": "Agent: the IPA's AppIcon asset includes a 1024x1024 image without transparency issues; upload not rejected for missing icon.",
+   "doc_url": "https://developer.apple.com/forums/thread/676977",
+   "checked": "2026-11-20",
+   "caveat": "Evidence is Apple Developer Forums and search results; Apple's Xcode doc 'configuring your app icon' was not fetched."
+  },
+  {
+   "id": "as.app-review-information",
+   "marketplace": "app_store",
+   "title": "App Review information: contact name, email, phone (international format) and notes",
+   "applies_when": "always",
+   "why": "Contact name, email and phone are required; notes are up to 4000 bytes.",
+   "owner_only": false,
+   "agent_path": "App Store Connect API appStoreReviewDetails (contact fields, demoAccount fields, notes).",
+   "owner_steps": [
+    "Console: Apps > app > version > App Review Information section."
+   ],
+   "verify": "Agent: appStoreReviewDetail has non-empty contactFirstName/LastName/Phone (+country code)/Email.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited App Store Connect Help page as read on 2026-11-20; App Store Connect menus change."
+  },
+  {
+   "id": "as.demo-account",
+   "marketplace": "app_store",
+   "title": "Demo account credentials (or demo mode) for App Review",
+   "applies_when": "app requires login or sign-in",
+   "why": "Guideline 2.1 requires a working, non-expiring demo account with the backend live; credentials go in App Review information.",
+   "owner_only": false,
+   "agent_path": "Set demoAccountRequired and credentials via appStoreReviewDetails; agent keeps the demo account alive.",
+   "owner_steps": [
+    "Console: Apps > app > version > App Review Information > Sign-in required: enter username and password; put extra accounts in Notes."
+   ],
+   "verify": "Agent: logging in with the stored demo credentials works against production from a clean install.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information",
+   "checked": "2026-11-20",
+   "caveat": "Not applicable if the app has no sign-in."
+  },
+  {
+   "id": "as.guideline-completeness",
+   "marketplace": "app_store",
+   "title": "App is a final, working version: no placeholders, working URLs, no crashes, IAPs complete (Guideline 2.1, 4.2)",
+   "applies_when": "always",
+   "why": "Crashes, placeholder content, dead links or incomplete bundles lead to rejection; the app must be more than a repackaged website.",
+   "owner_only": false,
+   "agent_path": "Agent runs the release build on a device, checks links and crash-free launch (the game's own gates).",
+   "owner_steps": [],
+   "verify": "Agent: release-build smoke test passes and all in-app URLs return 200.",
+   "doc_url": "https://developer.apple.com/app-store/review/guidelines/",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "as.account-deletion",
+   "marketplace": "app_store",
+   "title": "In-app account deletion (Guideline 5.1.1(v)); revoke Sign in with Apple tokens",
+   "applies_when": "app supports account creation",
+   "why": "Any app that supports account creation must let users initiate deletion in the app, deleting the account record and personal data, available to everyone regardless of region.",
+   "owner_only": false,
+   "agent_path": "Agent builds the flow; use the Sign in with Apple REST API revoke-tokens endpoint when applicable.",
+   "owner_steps": [],
+   "verify": "Agent: Settings has a discoverable delete-account action that completes deletion (or links directly to a web deletion page); deletion removes UGC and handles subscriptions.",
+   "doc_url": "https://developer.apple.com/support/offering-account-deletion-in-your-app/",
+   "checked": "2026-11-20",
+   "caveat": "Not applicable to apps with no accounts."
+  },
+  {
+   "id": "as.sign-in-with-apple",
+   "marketplace": "app_store",
+   "title": "Sign in with Apple or equivalent privacy-preserving login (Guideline 4.8)",
+   "applies_when": "app uses a third-party or social login for the primary account",
+   "why": "Third-party/social login for the primary account requires an equivalent login service that limits data to name and email, allows private email and avoids ad tracking without consent; exemptions apply for own-account-system-only, enterprise/education and similar.",
+   "owner_only": false,
+   "agent_path": "Agent implements the equivalent login.",
+   "owner_steps": [],
+   "verify": "Agent: if only first-party accounts or Game Center are used, record the exemption; otherwise the build offers an equivalent login.",
+   "doc_url": "https://developer.apple.com/app-store/review/guidelines/",
+   "checked": "2026-11-20",
+   "caveat": "Not applicable when only the app's own account system is used."
+  },
+  {
+   "id": "as.kids-category",
+   "marketplace": "app_store",
+   "title": "Kids category rules (parental gates, no third-party analytics/ads, children's privacy laws)",
+   "applies_when": "app marked Made for Kids or in the Kids Category",
+   "why": "Made for Kids cannot be changed after approval and all updates must follow Guideline 1.3; Made for Kids is only available at calculated 4+ or 9+.",
+   "owner_only": false,
+   "agent_path": "Agent audits SDKs and links.",
+   "owner_steps": [],
+   "verify": "Agent: not applicable unless Made for Kids is selected.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/manage-app-information/set-an-app-age-rating",
+   "checked": "2026-11-20"
+  },
+  {
+   "id": "as.in-app-purchases-ready",
+   "marketplace": "app_store",
+   "title": "In-App Purchases configured, reviewable, restorable, and submitted with the version",
+   "applies_when": "app sells digital goods or subscriptions",
+   "why": "IAP must be complete, visible to the reviewer and functional; unlocks must use IAP with a restore mechanism; submission items can be added alongside the version.",
+   "owner_only": false,
+   "agent_path": "App Store Connect API inAppPurchasesV2 and subscriptions resources; IAP review screenshot and metadata.",
+   "owner_steps": [
+    "Console: Apps > app > Monetization > In-App Purchases; add each product with reference name, product ID, price, display name, description and App Review screenshot; add them to the draft submission via Add for Review."
+   ],
+   "verify": "Agent: each product state is READY_TO_SUBMIT or approved; the app shows the products in a sandbox run.",
+   "doc_url": "https://developer.apple.com/app-store/review/guidelines/",
+   "checked": "2026-11-20",
+   "caveat": "Not applicable to a free app with no digital goods."
+  },
+  {
+   "id": "as.game-center-config",
+   "marketplace": "app_store",
+   "title": "Game Center entitlement in the build and Game Center configured in App Store Connect",
+   "applies_when": "app uses Game Center",
+   "why": "Apps using Game Center must have the entitlement and Game Center set up in App Store Connect; leaderboards/achievements submit with the version.",
+   "owner_only": false,
+   "agent_path": "App Store Connect API gameCenterDetail resources.",
+   "owner_steps": [],
+   "verify": "Agent: entitlement present in the signed IPA; GET /v1/apps/{id}/gameCenterDetail returns the config.",
+   "doc_url": "https://developer.apple.com/news/upcoming-requirements/",
+   "checked": "2026-11-20",
+   "caveat": "Not applicable if Game Center is not used."
+  },
+  {
+   "id": "as.app-tracking-transparency",
+   "marketplace": "app_store",
+   "title": "App Tracking Transparency prompt and purpose strings",
+   "applies_when": "app tracks users across apps/sites",
+   "why": "Guideline 5.1.2(i) requires explicit permission via ATT for tracking; apps may not require enabling system functions to use the app.",
+   "owner_only": false,
+   "agent_path": "Agent audits SDKs for tracking.",
+   "owner_steps": [],
+   "verify": "Agent: no tracking SDK, or ATT prompt with purpose string present.",
+   "doc_url": "https://developer.apple.com/app-store/review/guidelines/",
+   "checked": "2026-11-20",
+   "caveat": "Not applicable if no tracking."
+  },
+  {
+   "id": "as.regional-licensing",
+   "marketplace": "app_store",
+   "title": "Region-specific licensing fields (Korea GRAC, China ICP, Vietnam game license, regulated medical devices)",
+   "applies_when": "app distributed in Republic of Korea (org accounts), mainland China, Vietnam, or is a regulated medical-device/health app in EU/UK/US",
+   "why": "App Information lists conditional compliance fields; they only block if the app is distributed there or meets the criteria.",
+   "owner_only": true,
+   "agent_path": null,
+   "owner_steps": [
+    "Console: Apps > app > General > App Information; for the region you keep available, fill the Korea/China/Vietnam/medical-device fields shown; otherwise remove that region in Pricing and Availability."
+   ],
+   "verify": "Agent: territories in availability exclude regions whose fields are unfilled.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/reference/app-information/app-information",
+   "checked": "2026-11-20",
+   "caveat": "Simplest compliance for a hobby game is to omit these regions."
+  },
+  {
+   "id": "as.accessibility-nutrition-labels",
+   "marketplace": "app_store",
+   "title": "Accessibility Nutrition Labels (not yet mandatory)",
+   "applies_when": "voluntary as of 2026-11-20; Apple says it will become required for new apps and updates with ample notice",
+   "why": "Apple states providing labels is voluntary now and will later be required for submissions; no date given.",
+   "owner_only": false,
+   "agent_path": "App Store Connect API accessibility-declarations resources exist.",
+   "owner_steps": [],
+   "verify": "Agent: re-check https://developer.apple.com/news/upcoming-requirements/ each launch pass for a new date.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/manage-app-accessibility/overview-of-accessibility-nutrition-labels",
+   "checked": "2026-11-20",
+   "caveat": "Mark not applicable with reason 'not yet mandatory' until Apple dates it."
+  },
+  {
+   "id": "as.version-release-option",
+   "marketplace": "app_store",
+   "title": "Version release option chosen (manual, automatic, or automatic no earlier than a date)",
+   "applies_when": "always",
+   "why": "Each platform version needs a release option; manual leaves the approved app in Pending Developer Release until you release it.",
+   "owner_only": false,
+   "agent_path": "appStoreVersions releaseType attribute via the App Store Connect API.",
+   "owner_steps": [
+    "Console: Apps > app > version > App Store Version Release > pick 'Manually release this version', 'Automatically release this version' or the 'no earlier than' option, then Save (role: Account Holder, Admin or App Manager)."
+   ],
+   "verify": "Agent: appStoreVersion.releaseType is set.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/manage-your-apps-availability/select-an-app-store-version-release-option",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited App Store Connect Help page as read on 2026-11-20; App Store Connect menus change."
+  },
+  {
+   "id": "as.submit-for-review",
+   "marketplace": "app_store",
+   "title": "Add for Review and Submit for Review",
+   "applies_when": "always",
+   "why": "The version must be submitted to App Review (Add for Review, then Submit for Review); the API call is the equivalent of the Submit for Review button and errors on missing required info.",
+   "owner_only": true,
+   "agent_path": "App Store Connect API review-submissions: create a reviewSubmission, add the appStoreVersion as a reviewSubmissionItem, then PATCH submitted=true (resource pages exist in the API index; the Help page links to the Version Submissions doc).",
+   "owner_steps": [
+    "Open https://appstoreconnect.apple.com, Apps > select the app > click the version in the sidebar and verify the Build section.",
+    "Click Add for Review (top right), choose an existing draft submission or create a new one (status becomes Ready for Review).",
+    "Click Draft Submissions (bottom right) or App Review in the sidebar, open the submission and click Submit for Review (role: Account Holder, Admin or App Manager); status becomes In Review."
+   ],
+   "verify": "Agent: GET /v1/apps/{id}/reviewSubmissions shows state WAITING_FOR_REVIEW/IN_REVIEW; the version status is Waiting for Review.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/manage-submissions-to-app-review/submit-an-app",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited App Store Connect Help page as read on 2026-11-20; App Store Connect menus change. The review-submissions request shapes come from the API doc index plus general knowledge; the page body did not render. Confirm against a dry run before relying on them."
+  },
+  {
+   "id": "as.approved-and-released",
+   "marketplace": "app_store",
+   "title": "App approved and released to the App Store",
+   "applies_when": "always",
+   "why": "Publication means Ready for Distribution; with manual release the owner must click Release This Version, and the app can take up to 24 hours to appear.",
+   "owner_only": true,
+   "agent_path": "App Store Connect API appStoreVersionReleaseRequests (manual release) per the Help page.",
+   "owner_steps": [
+    "If the version status is Pending Developer Release: Apps > select the app > select that version in the sidebar > Release This Version (top right) > Confirm. Releases are per platform."
+   ],
+   "verify": "Agent: appStoreVersionState is READY_FOR_SALE and https://apps.apple.com/app/id<appleId> loads the product page.",
+   "doc_url": "https://developer.apple.com/help/app-store-connect/manage-your-apps-availability/select-an-app-store-version-release-option",
+   "checked": "2026-11-20",
+   "caveat": "Menu path quoted from the cited App Store Connect Help page as read on 2026-11-20; App Store Connect menus change."
+  }
+ ]
+}

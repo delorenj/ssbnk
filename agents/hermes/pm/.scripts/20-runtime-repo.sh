@@ -199,15 +199,18 @@ log "    singleton profile verified by flume remediate hermes.runtime-singleton:
 
 if [[ "$ROLE" == "pm" ]]; then
   VOX_PLUGIN_NAME="${VOX_PLUGIN_NAME:-$(config_get fleet.vox_plugin_name 'vox')}"
-  VOX_VOICE="${VOX_VOICE:-$(config_get fleet.vox_voice 'carlin')}"
+  # No default voice here: the fleet base (~/.hermes/config.yaml tts.vox.voice)
+  # is the default. VOX_VOICE set explicitly pins this desk; unset, the desk
+  # keeps its own pin or inherits the base.
+  VOX_VOICE="${VOX_VOICE:-}"
   VOX_PLUGIN_DIR="${VOX_PLUGIN_DIR:-$(config_get fleet.vox_plugin_dir "$HOME/code/voxxy/plugins/tts/$VOX_PLUGIN_NAME")}"
   if [[ -d "$VOX_PLUGIN_DIR" ]]; then
     mkdir -p "$PROFILE_HOME/plugins/tts"
     ln -sfn "$VOX_PLUGIN_DIR" "$PROFILE_HOME/plugins/tts/$VOX_PLUGIN_NAME"
     profile_voice_contract_set "$PROFILE_HOME" "$VOX_PLUGIN_NAME" "$VOX_VOICE" \
       || die "could not write the canonical PM voice contract to config.delta.yaml"
-    python3 - "$PROFILE_HOME/config.yaml" "$VOX_PLUGIN_NAME" "$VOX_VOICE" <<'PYEOF' \
-      || die "PM voice config is not the canonical vox/carlin contract"
+    SPOKEN_VOICE="$(python3 - "$PROFILE_HOME/config.yaml" "$VOX_PLUGIN_NAME" "$VOX_VOICE" <<'PYEOF'
+
 import pathlib, sys
 try:
     import yaml
@@ -217,11 +220,16 @@ config = yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")) o
 plugin, voice = sys.argv[2:4]
 enabled = ((config.get("plugins") or {}).get("enabled") or [])
 tts = config.get("tts") or {}
-actual_voice = ((tts.get(plugin) or {}).get("voice") or tts.get("voice") or "")
-if f"tts/{plugin}" not in enabled or tts.get("provider") != plugin or actual_voice != voice:
+# Vox speaks the top-level tts.voice first, then tts.<plugin>.voice.
+spoken = tts.get("voice") or (tts.get(plugin) or {}).get("voice") or ""
+if f"tts/{plugin}" not in enabled or tts.get("provider") != plugin or not spoken:
     raise SystemExit(1)
+if voice and spoken != voice:
+    raise SystemExit(1)
+print(spoken)
 PYEOF
-    log "    PM voice verified: provider=$VOX_PLUGIN_NAME voice=$VOX_VOICE"
+)" || die "PM voice config is not the canonical vox contract"
+    log "    PM voice verified: provider=$VOX_PLUGIN_NAME voice=$SPOKEN_VOICE"
   else
     log "    optional Vox plugin not installed; PM voice activation deferred"
   fi

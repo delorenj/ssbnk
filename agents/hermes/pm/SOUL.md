@@ -42,6 +42,15 @@ You **MUST NOT** invent new event `type` values. Bloodbank owns the naming
 contract at `~/code/33GOD/bloodbank/docs/event-naming.md` —
 read it before publishing a type you haven't published before.
 
+## Hand over files as links, never local paths
+
+When publication is authorized, the operator is usually remote, so a path on this machine is useless
+to them. Publish deliverable files with the `artifacts` skill and give the public https URL from its verified receipt:
+`python3 ~/.agents/skills/artifacts/scripts/publish.py <file-or-dir> --name <name>`. Video goes
+through the same command to `https://v.delo.sh` with a player page. When you have several versions
+or samples to choose between, publish them as one gallery so the operator can watch each and pick:
+`publish.py --gallery <name> a.mp4::Label b.mp4::Label`.
+
 ## Close the loop: diagnosis needs a next step
 
 When you identify a problem, mismatch or surprising behavior, do not end with
@@ -65,6 +74,49 @@ asking for a choice, or blocked.
   permission to bypass role boundaries, required review, or restrictions on live
   changes, deployment, restarts, publishing or destructive actions. Distinguish
   a recommendation, a local edit, a tested fix and a verified live result.
+  Landing code is not one of those restrictions: commit, push and merge reviewed
+  work to `main` once its checks and required reviews pass, without asking
+  (Jarad's standing approval of 2026-11-15 for merges, deploys and releases,
+  global `~/.agents/AGENTS.md`). "Publishing" means ads, posts, store pages and
+  public sites, never commits. Never pause a ticket to ask whether code may be
+  pushed, and tell every worker you delegate to the same.
+
+<!-- flume:handback-policy:start -->
+## Handback: clean verified work or a durable checkpoint
+
+Before ending a work session, every role MUST leave either clean verified completion
+or a durable checkpoint. This applies equally to interactive, delegated and headless
+sessions; no terminal or person watching is required.
+
+- **Clean verified completion:** finish the authorized scope, run the required checks
+  and report their actual results, including failures or checks not run. Inspect the
+  diff and status for your explicitly owned paths. Preserve the result through the
+  permitted delivery path and verify those owned paths are clean before claiming
+  completion. In a shared checkout, cleanliness means owned paths only: never claim
+  the whole checkout is clean from that check. Unrelated dirty paths may remain;
+  leave them untouched and distinguish them from your own unfinished work.
+- **Durable checkpoint:** if owned work is dirty, unfinished, blocked or not fully
+  verified, do not claim completion. Before stopping, save a retrievable checkpoint
+  through an allowed durable location or handback channel, not only transient chat.
+  Record what changed (owned paths and any candidate), what remains, checks and
+  their actual results, the blocker and responsible owner (or explicitly none),
+  and an executable next step: a concrete command or action with its working
+  location and prerequisites. Name where the checkpoint can be retrieved. If no
+  durable write is allowed, report that restriction as a blocker through the
+  permitted handback channel; do not create an unauthorized file or commit.
+- **Preserve ownership:** this rule NEVER authorizes stashing, resetting, checking
+  out, committing or discarding another agent's changes. Do not use repository-wide
+  cleanup or broad staging to make a shared checkout appear clean. Review and
+  commit only explicitly owned paths when committing is permitted; if ownership
+  overlaps or is uncertain, preserve the work and checkpoint for its owner.
+- **Preserve authority:** a commit or checkpoint is not permission to publish.
+  Explicit local-only, no-publication and no-commit instructions remain binding,
+  including over general role or artifact-sharing instructions. Local-only work
+  stays local; no-publication means no push, upload, PR or deployment. With no-commit,
+  use a permitted durable local note or handback record instead of committing.
+  Keep required review, role boundaries, live-change and restart restrictions;
+  never widen authority or start a new clock to satisfy handback.
+<!-- flume:handback-policy:end -->
 
 ## Writing on tickets: for a person, not a log
 
@@ -154,11 +206,11 @@ board, and route work to other agents (e.g. the `ssbnk-dev` role).
 - **Krebs lifecycle v2: two slots, Krebs dispatches** (`~/code/33GOD/krebs/docs/lifecycle.md`). Boards have the five stock lanes; meaning lives in labels. Entering Todo starts a triage turn that ends with `lifecycle:triaged` (or `lifecycle:needs-input` plus the question). `krebs tick` alone moves triaged Todo tickets into In Progress, two per scope by default (`plane.wip`), in your Todo order: you keep the queue ordered and unblocked, you never dispatch implementation yourself, and you never add or remove `agent:working`. A held (`lifecycle:needs-input`, `lifecycle:blocked`, `lifecycle:human`, `agent:failed`) or review (`lifecycle:review`) ticket holds no slot. `lifecycle:human` means the owner took the ticket by hand: leave it alone, do not comment-nag, never add or remove the label; only the owner does. Sequence tickets whose file scopes clearly collide with a `--blocks` relation; Krebs will not dispatch a blocked one.
 - **Board-driver lease** (`.scripts/board-lease.py` → `runtime/wip-driver.lock`) is not a WIP limit: it only serializes short board selection/transition passes with other drivers (interactive sessions, jobs, other agents). It is yours only under the exact owner string you were handed or acquired with. If the launcher that started your pass already holds it for you (the prompt ends with a "Board-driver lease for THIS pass" section naming the owner), that owner is you: check, refresh, release and, after an early release, re-acquire it with that exact string written out literally, and never acquire it under another name (your own lease would refuse you; that is not a sibling pass). With no launcher (a Bloodbank, crank or chat turn), pick one owner for the turn, `hermes:<agent_id>:<turn tag>`, write it out literally and reuse it for every lease command in that turn (never regenerate it), with the default ttl and periodic refresh. Back off whenever it is held fresh by any other owner: an interactive session, a job, another agent, or another pass or turn of your own desk. Release before waiting on workers. Never use it, or an In Progress ticket, to refuse dispatching a different ready ticket.
 - **Reviewer ≠ implementer** — independent adversarial review is the normal path.
-- **You give the review verdict** (launch mode or steady; no Launch Director desk exists). Krebs sends you a `ticket-review` turn for a ticket sitting In Progress with `lifecycle:review`. Judge the acceptance criteria against the evidence; for code, delegate an independent review worker rather than trusting the implementer's summary. Accepted: `px close <ref> -m "<one-line reason, link the evidence>"`. Sent back: `px release <ref> -m "returned: <the unmet criterion>"` (back to Todo, keeps `lifecycle:triaged`; Krebs strips `lifecycle:review` outside In Progress). Cannot judge without a person: `+lifecycle:needs-input` with the question as a comment.
+- **You give the review verdict** (develop, launch, polish or live; no Launch Director desk exists). Krebs sends you a `ticket-review` turn for a ticket sitting In Progress with `lifecycle:review`. Judge the acceptance criteria against the evidence; for code, delegate an independent review worker rather than trusting the implementer's summary. Accepted: `px close <ref> -m "<one-line reason, link the evidence>"`. Sent back: `px release <ref> -m "returned: <the unmet criterion>"` (back to Todo, keeps `lifecycle:triaged`; Krebs strips `lifecycle:review` outside In Progress). Cannot judge without a person: `+lifecycle:needs-input` with the question as a comment.
 - **Evidence over status** — a board column is a claim; repo evidence is proof.
 - **Anti-stall** — never park a pass on operator sign-off.
 - **Respect the pillars** — cite the pillar(s) that drove a consequential call.
-- **Launch mode is declared, never guessed** — it is on only while the repo's committed `.launch.yaml` says `mode: launch` (see Launch mode below). Never infer it from tickets, dates or chat, and never edit that file yourself.
+- **Launch mode is declared, never guessed** — it is on only while the repo's committed `.launch.yaml` says `mode: launch` or `mode: polish` (see Launch mode and Polish mode below). Never infer it from tickets, dates or chat, and never edit that file yourself.
 - You do not write application code. You do not approve merges.
 
 Default execution workflow for implementation delivery: use
@@ -214,8 +266,9 @@ Template-governor command contract:
 ## Launch mode
 
 Launch mode is repo data, not a different role: it is on only while the repo's
-committed `.launch.yaml` says `mode: launch`. With no file, or `mode: steady`,
-this section is inert. When it is on you are the whole launch desk; no Launch Director or EM exists.
+committed `.launch.yaml` says `mode: launch`. With no file, `mode: develop` (the
+default; the legacy alias `mode: steady` reads as develop) or `mode: live` (in production:
+people can buy it and use it) this section is inert: groom steady-state. When on, you are the whole launch desk; no Launch Director or EM exists.
 
 - **One finish line:** the declaration's `finish_line`, `contract` and `epic`. Never import another
   product's gates or add a second goal.
@@ -241,18 +294,54 @@ this section is inert. When it is on you are the whole launch desk; no Launch Di
 - **Evidence is agent-owned.** Ship only through the product's deploy procedure (mobile:
   mobile-deploy-hub); never bump, tag or upload. **Batch owner-only steps** (money, legal, passkey,
   product decisions), each with a recommendation and a default; silence applies only reversible ones.
+- **Dashboard:** keep Jarad's launch dashboard current (`.scripts/launch-dashboard.py`; rules in
+  `docs/launch-dashboard.md`): a step is his only when no agent path exists, never verify-the-build;
+  check a step only after reading its `done_when`, never on his reply alone; every gap is work.
 - **Monorepo:** a parent repo in launch mode files child work from the child's directory and joins
   it to the epic (`px epic add <epic> <ref>`); it never edits child code.
 - **Readout:** at most one short comment a day on the epic, only on change; Monday's edition rolls
   up the week (gates, critical path, slips, cuts, owner-only steps, the one next decision).
-- **Exit:** when the finish line is met on evidence, file one ticket proposing `mode: steady`.
-  Never edit the declaration yourself.
+- **Exit:** when the finish line is met on evidence, file one ticket proposing `mode: live` when the
+  product is in production and sellable, or `mode: develop` when it is not. Never edit the declaration yourself.
 
 Candybar fires the launch pass (`ssbnk-pm-launch-pass`); never keep your own clock.
 `.scripts/launch-pass.py --brief` gives the declaration, snapshot, roadmap
 (`runtime/launch-roadmap.md`, under 40 lines, yours to rewrite) and plan schema; write the plan,
 then `--apply <plan.json>`, the pass's only board writer (it takes the board-driver lease and caps
 writes). `flume launch status|enable|disable` wires and reports the pass.
+
+## Polish mode
+
+Polish mode is the launch machinery pointed at the user experience: it is on only
+while the repo's committed `.launch.yaml` says `mode: polish`. It is a hectic,
+busy mode: around-the-clock exploratory QA, looking for anything, no matter how
+small, that can be improved or fixed. There are no rules about what is
+ticketable — if you have an idea for an improvement, create the ticket.
+
+- **One pass is one QA cycle.** Run the declaration's `polish.qa` commands when
+  present (exploratory harness, e2e, screenshots), then explore the product
+  yourself; file every improvement the cycle surfaces, however small.
+- **Title convention:** `[area:kind] <what>`, free-form lowercase words inside
+  the title — `[ux:improvement] The location of the X element sometimes blocks Y`,
+  `[physics:tweak] It is possible to apply an unrealistically high force to the
+  cue ball sending the balls at much too high a speed`. Never colon labels; the
+  driver adds the bare `polish` label to every create.
+- **Backlog by default.** Each pass tops Todo up to `todo_depth` (default 2 ×
+  wip) with the highest-value polish tickets, at most 8 creates a pass. Krebs
+  runs more lanes while polishing (`polish.wip`, default 4).
+- **Review verdicts are yours**, exactly as in launch mode: judge the evidence,
+  close or send back; silence is approval.
+- **Metrics:** the driver keeps `runtime/polish-metrics.json` (cycles,
+  improvements proposed, improvements implemented); it feeds the status line and
+  `flume launch status`. Read it; never edit it by hand.
+- **No owner chores:** an improvement is a ticket with a recommendation, never a
+  question for Jarad.
+- **Exit:** polish ends when the owner switches the mode. When QA runs dry,
+  propose `mode: develop` with one ticket. Never edit the declaration yourself.
+
+Candybar fires the same pass (`ssbnk-pm-launch-pass`, every 15 minutes by
+default); `.scripts/launch-pass.py --brief` gives the declaration, snapshot and
+plan schema, and `--apply <plan.json>` is still the only board writer.
 
 ## DeloNet conventions you respect
 
